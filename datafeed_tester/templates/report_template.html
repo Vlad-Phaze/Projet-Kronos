@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <title>Rapport Backtest DCA - {{symbol}}</title>
+    <style>
+        html, body {
+            box-sizing: border-box;
+            display: flow-root;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border-radius: 8px;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 30px 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px 8px 0 0;
+            margin: -20px -20px 30px -20px;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        
+        .header .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+            margin-top: 10px;
+        }
+        
+        .nav-tabs {
+            display: flex;
+            border-bottom: 2px solid #e9ecef;
+            margin: 30px 0;
+        }
+        
+        .nav-tab {
+            padding: 12px 24px;
+            background: #f8f9fa;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            color: #6c757d;
+            border-radius: 4px 4px 0 0;
+            margin-right: 2px;
+        }
+        
+        .nav-tab.active {
+            background: #007bff;
+            color: white;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 24px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+            transition: transform 0.2s ease;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-2px);
+        }
+        
+        .metric-value {
+            font-size: 2.2em;
+            font-weight: bold;
+            margin-bottom: 8px;
+            display: block;
+        }
+        
+        .metric-label {
+            font-size: 0.95em;
+            opacity: 0.9;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .metric-positive { color: #28a745; }
+        .metric-negative { color: #dc3545; }
+        .metric-neutral { color: #6c757d; }
+        
+        .chart-section {
+            margin: 40px 0;
+        }
+        
+        .chart-container {
+            text-align: center;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .chart-container img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 6px;
+        }
+        
+        .section {
+            margin: 40px 0;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .section-header {
+            background: #343a40;
+            color: white;
+            padding: 16px 24px;
+            margin: 0;
+            font-size: 1.3em;
+            font-weight: 500;
+        }
+        
+        .section-content {
+            padding: 24px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95em;
+        }
+        
+        th, td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+            text-transform: uppercase;
+            font-size: 0.85em;
+            letter-spacing: 0.5px;
+        }
+        
+        tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .oos-warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 16px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        
+        .oos-warning strong {
+            color: #721c24;
+        }
+        
+        .split-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin: 30px 0;
+        }
+        
+        .info-box {
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 20px;
+            border-radius: 0 6px 6px 0;
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: #6c757d;
+            border-top: 1px solid #dee2e6;
+            margin-top: 50px;
+        }
+        
+        .tag {
+            display: inline-block;
+            background: #e9ecef;
+            color: #495057;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            margin: 2px;
+        }
+        
+        .positive { color: #28a745; }
+        .negative { color: #dc3545; }
+        .neutral { color: #6c757d; }
+        
+        @media (max-width: 768px) {
+            .summary-grid {
+                grid-template-columns: 1fr;
+            }
+            .split-section {
+                grid-template-columns: 1fr;
+            }
+            .container {
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>📊 Rapport Backtest DCA</h1>
+            <div class="subtitle">{{symbol}} | {{period}} | Généré le {{date}}</div>
+        </div>
+
+        <!-- Navigation -->
+        <div class="nav-tabs">
+            <button class="nav-tab active">📈 Résultats</button>
+            <button class="nav-tab">📊 Graphiques</button>
+            <button class="nav-tab">🗓️ Performance</button>
+            <button class="nav-tab">💼 Trades</button>
+            <button class="nav-tab">🔍 Analyse</button>
+            <button class="nav-tab">📋 Annexe</button>
+        </div>
+
+        <!-- Summary KPIs -->
+        <div class="summary-grid">
+            <div class="metric-card">
+                <span class="metric-value {{profit_class}}">{{net_profit}}%</span>
+                <div class="metric-label">Profit Net</div>
+            </div>
+            <div class="metric-card">
+                <span class="metric-value">{{cagr}}%</span>
+                <div class="metric-label">CAGR</div>
+            </div>
+            <div class="metric-card">
+                <span class="metric-value {{drawdown_class}}">{{max_drawdown}}%</span>
+                <div class="metric-label">Max Drawdown</div>
+            </div>
+            <div class="metric-card">
+                <span class="metric-value">{{sharpe_ratio}}</span>
+                <div class="metric-label">Sharpe Ratio</div>
+            </div>
+            <div class="metric-card">
+                <span class="metric-value">{{win_rate}}%</span>
+                <div class="metric-label">Win Rate</div>
+            </div>
+            <div class="metric-card">
+                <span class="metric-value">{{total_trades}}</span>
+                <div class="metric-label">Total Trades</div>
+            </div>
+        </div>
+
+        <!-- Courbes -->
+        <div class="section">
+            <h2 class="section-header">📈 Courbe d'Equity</h2>
+            <div class="chart-container">
+                <img src="data:image/png;base64,{{equity_chart}}" alt="Courbe d'equity">
+            </div>
+        </div>
+
+        {{#drawdown_chart}}
+        <div class="section">
+            <h2 class="section-header">📉 Drawdown</h2>
+            <div class="chart-container">
+                <img src="data:image/png;base64,{{drawdown_chart}}" alt="Courbe de drawdown">
+            </div>
+        </div>
+        {{/drawdown_chart}}
+
+        <!-- Performance mensuelle -->
+        <div class="section">
+            <h2 class="section-header">🗓️ Performance Mensuelle</h2>
+            <div class="section-content">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Mois</th>
+                            <th>Return (%)</th>
+                            <th>Trades</th>
+                            <th>Profit/Loss</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{#monthly_performance}}
+                        <tr>
+                            <td>{{month}}</td>
+                            <td class="{{return_class}}">{{return}}%</td>
+                            <td>{{trades}}</td>
+                            <td class="{{pnl_class}}">{{pnl}}</td>
+                        </tr>
+                        {{/monthly_performance}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Meilleurs/Pires Trades -->
+        <div class="split-section">
+            <div class="section">
+                <h3 class="section-header">🏆 Top 5 Trades</h3>
+                <div class="section-content">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Return (%)</th>
+                                <th>Durée</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{#best_trades}}
+                            <tr>
+                                <td>{{date}}</td>
+                                <td class="positive">{{return}}%</td>
+                                <td>{{duration}}</td>
+                            </tr>
+                            {{/best_trades}}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h3 class="section-header">📉 Pires 5 Trades</h3>
+                <div class="section-content">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Return (%)</th>
+                                <th>Durée</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{#worst_trades}}
+                            <tr>
+                                <td>{{date}}</td>
+                                <td class="negative">{{return}}%</td>
+                                <td>{{duration}}</td>
+                            </tr>
+                            {{/worst_trades}}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- IS/OOS Analysis -->
+        <div class="section">
+            <h2 class="section-header">🔍 Analyse In-Sample / Out-of-Sample</h2>
+            <div class="section-content">
+                {{#oos_warning}}
+                <div class="oos-warning">
+                    <strong>⚠️ Attention:</strong> {{oos_warning}}
+                </div>
+                {{/oos_warning}}
+                
+                <div class="split-section">
+                    <div class="info-box">
+                        <h4>📊 In-Sample ({{is_period}})</h4>
+                        <p><strong>Return:</strong> <span class="{{is_return_class}}">{{is_return}}%</span></p>
+                        <p><strong>Sharpe:</strong> {{is_sharpe}}</p>
+                        <p><strong>Max DD:</strong> <span class="negative">{{is_max_dd}}%</span></p>
+                        <p><strong>Trades:</strong> {{is_trades}}</p>
+                    </div>
+                    
+                    <div class="info-box">
+                        <h4>🎯 Out-of-Sample ({{oos_period}})</h4>
+                        <p><strong>Return:</strong> <span class="{{oos_return_class}}">{{oos_return}}%</span></p>
+                        <p><strong>Sharpe:</strong> {{oos_sharpe}}</p>
+                        <p><strong>Max DD:</strong> <span class="negative">{{oos_max_dd}}%</span></p>
+                        <p><strong>Trades:</strong> {{oos_trades}}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Annexe -->
+        <div class="section">
+            <h2 class="section-header">📋 Annexe Technique</h2>
+            <div class="section-content">
+                <h4>🔗 Sources de Données</h4>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Source</th>
+                            <th>Score Qualité</th>
+                            <th>Période</th>
+                            <th>Points</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{#data_sources}}
+                        <tr>
+                            <td>{{source}}</td>
+                            <td><span class="tag">{{score}}/100</span></td>
+                            <td>{{period}}</td>
+                            <td>{{points}}</td>
+                        </tr>
+                        {{/data_sources}}
+                    </tbody>
+                </table>
+                
+                <h4 style="margin-top: 30px;">⚙️ Paramètres de la Stratégie</h4>
+                <div class="info-box">
+                    <p><strong>RSI Period:</strong> {{rsi_period}}</p>
+                    <p><strong>RSI Entry:</strong> {{rsi_entry}}</p>
+                    <p><strong>RSI Exit:</strong> {{rsi_exit}}</p>
+                    <p><strong>Take Profit:</strong> {{take_profit}}%</p>
+                    <p><strong>Stop Loss:</strong> {{stop_loss}}%</p>
+                    <p><strong>Max Safety Orders:</strong> {{max_so}}</p>
+                    <p><strong>SO Volume Scale:</strong> {{so_scale}}</p>
+                    <p><strong>SO Step Scale:</strong> {{so_step_scale}}</p>
+                </div>
+                
+                <h4 style="margin-top: 30px;">🔐 Empreinte des Données</h4>
+                <div class="info-box">
+                    <p><strong>Hash:</strong> <code>{{data_hash}}</code></p>
+                    <p><strong>Version API:</strong> {{api_version}}</p>
+                    <p><strong>Seed:</strong> {{seed}}</p>
+                    <p><strong>Date génération:</strong> {{generation_date}}</p>
+                    <p><strong>Run ID:</strong> <code>{{run_id}}</code></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>🚀 Généré par API Kronos | Version {{api_version}} | {{generation_date}}</p>
+            <p style="font-size: 0.8em; color: #999;">
+                Ce rapport a été généré automatiquement. Les performances passées ne garantissent pas les résultats futurs.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Simple script pour les onglets (optionnel)
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                // Ici on pourrait ajouter la logique pour changer de section
+            });
+        });
+    </script>
+</body>
+</html>

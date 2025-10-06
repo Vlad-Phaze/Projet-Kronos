@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Kronos - Stratégies Python Personnalisées</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        .content {
+            padding: 40px;
+        }
+        .route-section {
+            margin-bottom: 40px;
+            padding: 25px;
+            border: 1px solid #e1e8ed;
+            border-radius: 10px;
+            background: #f8fafc;
+        }
+        .route-title {
+            font-size: 1.4em;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        .method {
+            padding: 5px 15px;
+            border-radius: 5px;
+            color: white;
+            font-size: 0.8em;
+            font-weight: bold;
+            margin-right: 15px;
+        }
+        .get { background: #28a745; }
+        .post { background: #007bff; }
+        .route-desc {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+        .test-button {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        .test-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(52, 152, 219, 0.3);
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #e8f5e8;
+            border-left: 4px solid #28a745;
+            display: none;
+        }
+        .error {
+            background: #fdeaea;
+            border-left-color: #dc3545;
+        }
+        .json-display {
+            background: #f1f3f4;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            margin-top: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .status {
+            display: inline-block;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            width: 100%;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🐍 API Kronos</h1>
+            <p>Backtesteur DCA avec Stratégies Python Personnalisées</p>
+        </div>
+        
+        <div class="content">
+            <div id="status" class="status">
+                ✅ API disponible sur http://localhost:5002 - Créez vos stratégies DCA en Python!
+            </div>
+
+            <!-- Route 1: Health Check -->
+            <div class="route-section">
+                <div class="route-title">
+                    <span class="method get">GET</span>
+                    /health
+                </div>
+                <div class="route-desc">
+                    Vérifier le statut de l'API et sa disponibilité.
+                </div>
+                <button class="test-button" onclick="testHealth()">
+                    🔍 Tester Health
+                </button>
+                <div id="health-result" class="result"></div>
+            </div>
+
+            <!-- Route 2: Strategies Template -->
+            <div class="route-section">
+                <div class="route-title">
+                    <span class="method get">GET</span>
+                    /strategies
+                </div>
+                <div class="route-desc">
+                    Obtenir le template et la documentation pour créer des stratégies Python personnalisées.
+                </div>
+                <button class="test-button" onclick="testStrategies()">
+                    📖 Voir Documentation
+                </button>
+                <div id="strategies-result" class="result"></div>
+            </div>
+
+            <!-- Route 3: Backtest avec Stratégie Python Personnalisée -->
+            <div class="route-section">
+                <div class="route-title">
+                    <span class="method post">POST</span>
+                    /backtest
+                </div>
+                <div class="route-desc">
+                    Exécuter un backtest DCA avec votre stratégie Python personnalisée. Modifiez le code ci-dessous pour définir vos paramètres.
+                </div>
+                
+                <!-- Éditeur de code Python -->
+                <div style="margin: 20px 0;">
+                    <label for="strategy-code" style="font-weight: bold; display: block; margin-bottom: 10px;">
+                        🐍 Code Python de votre stratégie DCA personnalisée:
+                    </label>
+                    <textarea id="strategy-code" style="
+                        width: 100%; 
+                        height: 300px; 
+                        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+                        font-size: 14px;
+                        padding: 15px;
+                        border: 2px solid #e1e8ed;
+                        border-radius: 8px;
+                        background: #1e1e1e;
+                        color: #f8f8f2;
+                        resize: vertical;
+                        box-sizing: border-box;
+                    "># Définir votre stratégie DCA personnalisée
+def create_custom_strategy():
+    '''
+    Créez votre stratégie DCA en modifiant les paramètres ci-dessous
+    '''
+    return {
+        # Nombre d'ordres de sécurité maximum
+        "safety_orders": 5,
+        
+        # Montant par ordre (en USD)
+        "amount_per_order": 1000,
+        
+        # Déviation de prix pour déclencher les safety orders (%)
+        "price_deviation": 2.5,
+        
+        # Take profit cible (%)
+        "take_profit": 1.5,
+        
+        # Activer le RSI
+        "rsi_enabled": True,
+        "rsi_period": 14,
+        "rsi_oversold": 30,
+        
+        # Activer les Bollinger Bands
+        "bollinger_enabled": True,
+        "bb_period": 20,
+        "bb_multiplier": 2.0
+    }
+
+# Retourner les paramètres de stratégie
+create_custom_strategy()</textarea>
+                </div>
+                
+                <!-- Boutons d'aide -->
+                <div style="margin: 10px 0;">
+                    <button class="test-button" onclick="getStrategyTemplate()" style="background: #6f42c1;">
+                        📖 Voir Documentation
+                    </button>
+                </div>
+                
+                <button class="test-button" onclick="testBacktest()">
+                    🚀 Lancer Backtest avec Stratégie Personnalisée
+                </button>
+                <div id="backtest-result" class="result"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5002';
+
+        async function testHealth() {
+            const resultDiv = document.getElementById('health-result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '⏳ Test en cours...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                
+                resultDiv.className = 'result';
+                resultDiv.innerHTML = `
+                    <strong>✅ Succès!</strong>
+                    <div class="json-display">${JSON.stringify(data, null, 2)}</div>
+                `;
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<strong>❌ Erreur:</strong> ${error.message}`;
+            }
+        }
+
+        async function testStrategies() {
+            const resultDiv = document.getElementById('strategies-result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '⏳ Chargement du template de stratégie...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/strategies`);
+                const data = await response.json();
+                
+                resultDiv.className = 'result';
+                resultDiv.innerHTML = `
+                    <strong>✅ Template de stratégie Python disponible!</strong>
+                    <div style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                        <h4>📖 Documentation des paramètres:</h4>
+                        <ul style="margin: 10px 0; padding-left: 20px;">
+                            <li><strong>safety_orders:</strong> ${data.parameters_info.safety_orders}</li>
+                            <li><strong>amount_per_order:</strong> ${data.parameters_info.amount_per_order}</li>
+                            <li><strong>price_deviation:</strong> ${data.parameters_info.price_deviation}</li>
+                            <li><strong>take_profit:</strong> ${data.parameters_info.take_profit}</li>
+                            <li><strong>rsi_period:</strong> ${data.parameters_info.rsi_period}</li>
+                            <li><strong>rsi_oversold:</strong> ${data.parameters_info.rsi_oversold}</li>
+                            <li><strong>bb_period:</strong> ${data.parameters_info.bb_period}</li>
+                            <li><strong>bb_multiplier:</strong> ${data.parameters_info.bb_multiplier}</li>
+                        </ul>
+                    </div>
+                `;
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<strong>❌ Erreur:</strong> ${error.message}`;
+            }
+        }
+
+        async function getStrategyTemplate() {
+            const resultDiv = document.getElementById('strategies-result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '⏳ Chargement de la documentation...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/strategies`);
+                const data = await response.json();
+                
+                resultDiv.className = 'result';
+                resultDiv.innerHTML = `
+                    <strong>✅ Documentation des paramètres de stratégie:</strong>
+                    <div style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                        <h4>📋 Paramètres disponibles:</h4>
+                        <ul style="margin: 10px 0; padding-left: 20px;">
+                            <li><strong>safety_orders:</strong> ${data.parameters_info.safety_orders}</li>
+                            <li><strong>amount_per_order:</strong> ${data.parameters_info.amount_per_order}</li>
+                            <li><strong>price_deviation:</strong> ${data.parameters_info.price_deviation}</li>
+                            <li><strong>take_profit:</strong> ${data.parameters_info.take_profit}</li>
+                            <li><strong>rsi_period:</strong> ${data.parameters_info.rsi_period}</li>
+                            <li><strong>rsi_oversold:</strong> ${data.parameters_info.rsi_oversold}</li>
+                            <li><strong>bb_period:</strong> ${data.parameters_info.bb_period}</li>
+                            <li><strong>bb_multiplier:</strong> ${data.parameters_info.bb_multiplier}</li>
+                        </ul>
+                        <p style="color: #666; font-style: italic;">💡 Modifiez ces valeurs dans l'éditeur de code ci-dessus pour personnaliser votre stratégie.</p>
+                    </div>
+                `;
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<strong>❌ Erreur:</strong> ${error.message}`;
+            }
+        }
+
+        async function testBacktest() {
+            const resultDiv = document.getElementById('backtest-result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '⏳ Validation du code Python et lancement du backtest...';
+            
+            // Récupération du code Python personnalisé
+            const strategyCode = document.getElementById('strategy-code').value.trim();
+            
+            if (!strategyCode) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = '<strong>❌ Erreur:</strong> Veuillez saisir votre code de stratégie Python.';
+                return;
+            }
+            
+            resultDiv.innerHTML = '⚡ Exécution du backtest avec votre stratégie personnalisée...';
+            
+            const payload = {
+                symbol: "BTC-USD",
+                strategy_code: strategyCode
+            };
+            
+            try {
+                const response = await fetch(`${API_BASE}/backtest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.className = 'result';
+                    let downloadButton = '';
+                    if (data.html_report && data.html_report.available) {
+                        downloadButton = `
+                            <div style="margin: 20px 0; text-align: center;">
+                                <button onclick="downloadReport('${data.html_report.run_id}')" 
+                                        style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px;">
+                                    📄 Télécharger le Rapport HTML Complet
+                                </button>
+                            </div>
+                        `;
+                    }
+                    
+                    resultDiv.innerHTML = `
+                        <strong>✅ Backtest terminé avec votre stratégie personnalisée!</strong>
+                        <div style="margin: 15px 0; padding: 15px; background: #e8f5e8; border-radius: 8px;">
+                            <h4>📊 Résultats de votre stratégie:</h4>
+                            <p><strong>Trades exécutés:</strong> ${data.trades_count || 'N/A'}</p>
+                            <p><strong>Win Rate:</strong> ${data.win_rate ? data.win_rate.toFixed(2) + '%' : 'N/A'}</p>
+                            <p><strong>PnL Total:</strong> ${data.total_pnl ? '$' + data.total_pnl.toFixed(2) : 'N/A'}</p>
+                            <p><strong>Max Drawdown:</strong> ${data.max_drawdown ? data.max_drawdown.toFixed(2) + '%' : 'N/A'}</p>
+                            <h5>🧬 Paramètres de votre stratégie:</h5>
+                            <div style="font-size: 0.9em; color: #555;">
+                                📊 Safety Orders: ${data.custom_strategy?.safety_orders || 'N/A'} |
+                                💰 Montant: $${data.custom_strategy?.amount_per_order || 'N/A'} |
+                                📉 Déviation: ${data.custom_strategy?.price_deviation || 'N/A'}% |
+                                🎯 Take Profit: ${data.custom_strategy?.take_profit || 'N/A'}%
+                            </div>
+                        </div>
+                        ${downloadButton}
+                        <div class="json-display">${JSON.stringify(data, null, 2)}</div>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<strong>❌ Erreur dans votre code Python:</strong> ${data.error}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<strong>❌ Erreur de communication:</strong> ${error.message}`;
+            }
+        }
+        
+        // Fonction pour télécharger le rapport HTML
+        function downloadReport(runId) {
+            const url = `${API_BASE}/download-report/${runId}`;
+            window.open(url, '_blank');
+        }
+    </script>
+</body>
+</html>
