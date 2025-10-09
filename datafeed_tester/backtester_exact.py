@@ -68,9 +68,10 @@ def calculer_indicateurs_exact(prix_df: pd.DataFrame, parametres: ParametresDCA_
     return rsi_values, bbp_values
 
 
-def backtest_dca_exact(prix: pd.DataFrame, signal_entree: pd.Series, parametres: ParametresDCA_Exact) -> Tuple[pd.DataFrame, pd.Series, Dict]:
+def backtest_dca_exact(prix: pd.DataFrame, signal_entree: pd.Series, parametres: ParametresDCA_Exact, framework_cash: float = 1000000) -> Tuple[pd.DataFrame, pd.Series, Dict]:
     """
     Backtester reproduisant EXACTEMENT l'ordre d'évaluation de dca_library_backtestingpy.py
+    Avec simulation du scaling automatique du framework backtesting
     """
     for c in ("Open", "High", "Low", "Close"):
         assert c in prix.columns, f"la colonne {c} n'existe pas dans les prix"
@@ -112,11 +113,17 @@ def backtest_dca_exact(prix: pd.DataFrame, signal_entree: pd.Series, parametres:
         # LOGIQUE D'ENTRÉE (EXACTEMENT comme dca_library.next())
         if not position:
             if rsi < parametres.rsi_entry:  # direction == 'long' et rsi < rsi_entry
-                # Entrée en position
+                # Entrée en position avec scaling du framework backtesting
                 position = True
                 entry_price = price
-                total_cost = price
-                total_qty = 1.0
+                
+                # Scaling automatique comme framework backtesting
+                # Framework: quantité adaptée au cash disponible
+                base_qty = framework_cash / price  # Quantité max avec le cash initial
+                scaled_qty = min(base_qty, 1.0)  # Limité à 1 si le cash est suffisant
+                
+                total_cost = price * scaled_qty
+                total_qty = scaled_qty
                 safety_orders = [price]
                 print(f"[LONG] Entrée à {price:.2f}")
                 
@@ -161,22 +168,31 @@ def backtest_dca_exact(prix: pd.DataFrame, signal_entree: pd.Series, parametres:
                 safety_orders = []
                 
             # SAFETY ORDERS (EXACTEMENT comme dca_library)
-            elif len(safety_orders) < parametres.nb_max_so + 1:  # +1 car on inclut l'entrée initiale
-                last_so_price = safety_orders[-1]
-                step_scaled = parametres.deviation_premier_so * (parametres.step_scale ** len(safety_orders))
-                price_deviation = abs((last_so_price - price) / last_so_price)
-                
-                # Conditions EXACTES de dca_library
-                bbp_ok = bbp < parametres.bbp_trigger  # position longue
-                deviation_ok = price_deviation >= step_scaled
-                
-                if deviation_ok and bbp_ok:
-                    qty = parametres.quantite_base * (parametres.volume_scale ** len(safety_orders))
-                    total_cost += price * qty
-                    total_qty += qty
-                    safety_orders.append(price)
+            else:
+                # Dans dca_library: len(safety_orders) < so_max avec safety_orders incluant l'entrée
+                if len(safety_orders) < parametres.nb_max_so:  # RETOUR à la condition originale !
+                    last_so_price = safety_orders[-1]
+                    # Pour step_scaled, utiliser le nombre de SO réels (sans l'entrée)  
+                    nb_safety_orders_only = len(safety_orders) - 1
+                    step_scaled = parametres.deviation_premier_so * (parametres.step_scale ** nb_safety_orders_only)
+                    price_deviation = abs((last_so_price - price) / last_so_price)
                     
-                    print(f"Safety Order #{len(safety_orders)} à {price:.2f}")
+                    # Conditions EXACTES de dca_library
+                    bbp_ok = bbp < parametres.bbp_trigger  # position longue
+                    deviation_ok = price_deviation >= step_scaled
+                    
+                    if deviation_ok and bbp_ok:
+                        # Volume_scale avec scaling du framework backtesting
+                        base_qty = 1.0 * (parametres.volume_scale ** nb_safety_orders_only)
+                        
+                        # Scaling automatique comme framework backtesting
+                        so_qty = (framework_cash / price) * base_qty * 0.01  # Fraction du cash pour SO
+                        
+                        total_cost += price * so_qty
+                        total_qty += so_qty
+                        safety_orders.append(price)
+                        
+                        print(f"Safety Order #{len(safety_orders)} à {price:.2f}")
     
     # Si position ouverte à la fin, la fermer
     if position:
@@ -237,8 +253,8 @@ if __name__ == "__main__":
     params_exact = ParametresDCA_Exact()
     signal_entree = pd.Series(True, index=df.index)
     
-    # Test
-    trades, equity, stats = backtest_dca_exact(df, signal_entree, params_exact)
+    # Test avec framework cash
+    trades, equity, stats = backtest_dca_exact(df, signal_entree, params_exact, framework_cash=1000000)
     
     print(f"Nombre de trades: {len(trades)}")
     if not trades.empty:

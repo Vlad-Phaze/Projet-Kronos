@@ -2,68 +2,161 @@
 <html lang="fr">
 <head>
     <meta charset="utf-8">
-    <title>Rapport Backtest DCA - {{symbol}}</title>
+    <title>🚀 KRONOS BACKTEST REPORT - {{symbol}}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        html, body {
+        :root {
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #111111;
+            --bg-card: #1a1a1a;
+            --border-primary: #21262d;
+            --border-accent: #00ff88;
+            --text-primary: #f0f6fc;
+            --text-secondary: #7d8590;
+            --text-accent: #00ff88;
+            --accent-blue: #58a6ff;
+            --accent-orange: #ff7b72;
+            --glow-green: rgba(0, 255, 136, 0.3);
+            --glow-blue: rgba(88, 166, 255, 0.3);
+        }
+
+        * {
             box-sizing: border-box;
-            display: flow-root;
+        }
+
+        html, body {
             height: 100%;
             margin: 0;
             padding: 0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f5f7fa;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow-x: hidden;
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
-            padding: 20px;
-            background: white;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            border-radius: 8px;
+            padding: 2rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            border-radius: 12px;
+            box-shadow: 0 0 30px rgba(0, 255, 136, 0.1);
         }
         
         .header {
             text-align: center;
-            padding: 30px 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-radius: 8px 8px 0 0;
-            margin: -20px -20px 30px -20px;
+            padding: 3rem 0;
+            background: linear-gradient(135deg, var(--bg-card) 0%, #1a2332 50%, var(--bg-card) 100%);
+            border: 1px solid var(--border-accent);
+            border-radius: 12px;
+            margin: -2rem -2rem 3rem -2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--text-accent), transparent);
+            animation: scan 3s infinite;
+        }
+
+        @keyframes scan {
+            0% { left: -100%; }
+            100% { left: 100%; }
         }
         
         .header h1 {
             margin: 0;
-            font-size: 2.5em;
-            font-weight: 300;
+            font-size: 3rem;
+            font-weight: 700;
+            color: var(--text-accent);
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            text-shadow: 0 0 20px var(--glow-green);
         }
         
         .header .subtitle {
-            font-size: 1.1em;
-            opacity: 0.9;
-            margin-top: 10px;
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            margin-top: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+
+        .status-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .status-card:hover {
+            border-color: var(--text-accent);
+            box-shadow: 0 0 15px var(--glow-green);
+        }
+
+        .status-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--text-accent);
+            margin-bottom: 0.5rem;
+        }
+
+        .status-label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
         
         .nav-tabs {
             display: flex;
-            border-bottom: 2px solid #e9ecef;
-            margin: 30px 0;
+            border-bottom: 2px solid var(--border-primary);
+            margin: 3rem 0;
         }
         
         .nav-tab {
-            padding: 12px 24px;
-            background: #f8f9fa;
-            border: none;
+            padding: 1rem 2rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
             cursor: pointer;
             font-weight: 500;
-            color: #6c757d;
-            border-radius: 4px 4px 0 0;
+            color: var(--text-secondary);
+            border-radius: 8px 8px 0 0;
             margin-right: 2px;
+            font-family: inherit;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+        }
+
+        .nav-tab:hover {
+            color: var(--text-accent);
+            border-color: var(--text-accent);
         }
         
         .nav-tab.active {
-            background: #007bff;
-            color: white;
+            background: var(--text-accent);
+            color: var(--bg-primary);
+            border-color: var(--text-accent);
+            box-shadow: 0 0 15px var(--glow-green);
         }
         
         .summary-grid {

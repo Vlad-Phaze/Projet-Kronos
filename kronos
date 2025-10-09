@@ -1,0 +1,3 @@
+#!/bin/bash
+# Script court pour redémarrer Kronos rapidement
+/Users/vladimirkronos/Downloads/Projet-Kronos-main/restart_services.sh
