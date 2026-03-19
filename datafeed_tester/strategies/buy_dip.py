@@ -2,7 +2,37 @@
 import pandas as pd
 from typing import Dict, Any
 from datafeed_tester.core.types import BaseStrategy
-import pandas_ta as ta
+try:
+    import pandas_ta as ta
+except Exception:
+    # Lightweight fallback for environments where pandas_ta is not available.
+    # We only implement the small subset used by this strategy: rsi and bbands.
+    class _SimpleTA:
+        @staticmethod
+        def rsi(series, length=14):
+            # Wilder's RSI approximation using exponential moving averages
+            delta = series.diff()
+            up = delta.clip(lower=0.0)
+            down = -delta.clip(upper=0.0)
+            # Use simple rma / ema-like smoothing
+            ma_up = up.ewm(alpha=1/length, adjust=False).mean()
+            ma_down = down.ewm(alpha=1/length, adjust=False).mean()
+            rs = ma_up / ma_down.replace(0, 1e-8)
+            rsi = 100 - 100 / (1 + rs)
+            return rsi
+
+        @staticmethod
+        def bbands(series, length=20, std=2):
+            ma = series.rolling(window=length, min_periods=1).mean()
+            sd = series.rolling(window=length, min_periods=1).std(ddof=0)
+            upper = ma + std * sd
+            lower = ma - std * sd
+            # pandas_ta returns a DataFrame with keys like 'BBL_20_3.0' and 'BBU_20_3.0'
+            key_low = f"BBL_{length}_{float(std)}"
+            key_up = f"BBU_{length}_{float(std)}"
+            return {key_low: lower, key_up: upper}
+
+    ta = _SimpleTA()
 import numpy as np
 
 class DCAStrategy(BaseStrategy):

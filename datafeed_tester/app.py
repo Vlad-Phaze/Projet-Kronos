@@ -17,15 +17,21 @@ for module in modules_to_reload:
         del sys.modules[module]
         print(f"   ✅ Module {module} supprimé")
 
-print("📥 Import FRAIS du backtester EXACT...")
-# L'import va maintenant charger la version exacte
-from backtester_exact import backtest_dca_exact
-print("✅ Backtester EXACT importé avec succès")
+print("📥 Import FRAIS du backtester EXACT (optional)...")
+backtest_dca_exact = None
+try:
+    import backtester_exact
+    from backtester_exact import backtest_dca_exact
+    print("✅ Backtester EXACT importé avec succès")
+except Exception as e:
+    print(f"⚠️ backtester_exact import failed (continuing without it): {e}")
 
 import json
 import uuid
 import tempfile
 import hashlib
+import base64
+from io import BytesIO
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional, Any
 
@@ -109,6 +115,511 @@ BACKTEST_STORE = {}  # {run_id: {"results": dict, "images": dict, "data": df}}
 app = Flask(__name__)
 CORS(app)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+
+# Import helper to run multi-asset vectorbt backtests (uses project fetcher)
+try:
+    from run_multi_vectorbt import run_multi_backtest
+except Exception:
+    # fallback if module not importable by name; try package import
+    try:
+        from datafeed_tester.run_multi_vectorbt import run_multi_backtest
+    except Exception:
+        run_multi_backtest = None
+
+
+@app.route('/run-multi-backtest', methods=['POST'])
+def run_multi_backtest_endpoint():
+    if run_multi_backtest is None:
+        return jsonify({'error': 'run_multi_backtest not available on server'}), 500
+
+    payload = request.get_json(force=True)
+    if not payload:
+        return jsonify({'error': 'JSON payload required'}), 400
+
+    bases = payload.get('bases')
+    if isinstance(bases, str):
+        bases = [b.strip().upper() for b in bases.split(',') if b.strip()]
+    if not bases or not isinstance(bases, (list, tuple)):
+        return jsonify({'error': 'bases must be provided as list or comma string'}), 400
+
+    weights = payload.get('weights')
+    if isinstance(weights, str):
+        try:
+            weights = [float(w.strip()) for w in weights.split(',') if w.strip()]
+        except Exception:
+            return jsonify({'error': 'weights must be float values separated by comma'}), 400
+
+    exchange = payload.get('exchange', 'binance')
+    timeframe = payload.get('timeframe', '1h')
+    init_cash = float(payload.get('init_cash', 100000.0))
+    start = payload.get('start')
+    end = payload.get('end')
+
+    # fee/slippage accepted but not used by current runner (kept for forward compatibility)
+    fee = float(payload.get('fee', 0.0))
+    slippage = float(payload.get('slippage', 0.0))
+
+    try:
+        per_stats_df, combined_stats, eq_df, combined_equity = run_multi_backtest(
+            bases, exchange=exchange, timeframe=timeframe, init_cash=init_cash, start=start, end=end, weights=weights,
+            fee=fee, slippage=slippage
+        )
+
+        # Paths where the runner saved CSVs (relative to project root)
+        result_files = {
+            'per_asset_stats': 'multi_vectorbt_per_asset_stats.csv',
+            'per_asset_equity': 'multi_vectorbt_per_asset_equity.csv',
+            'combined_equity': 'multi_vectorbt_combined_equity.csv',
+            'combined_stats': 'multi_vectorbt_combined_stats.csv'
+        }
+
+        return jsonify({
+            'ok': True,
+            'files': result_files,
+            'combined_stats': convert_pandas_to_json(combined_stats),
+            'per_asset_stats': convert_pandas_to_json(per_stats_df)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/plot-combined-equity', methods=['GET', 'POST'])
+def plot_combined_equity():
+    """Return a PNG plot of combined equity.
+
+    GET: reads `datafeed_tester/multi_vectorbt_combined_equity.csv` and returns PNG.
+    POST: accepts JSON {"equity": [values], "index": [iso timestamps optional]} and returns PNG.
+    """
+    try:
+        if request.method == 'POST':
+            payload = request.get_json(force=True)
+            if not payload or 'equity' not in payload:
+                return jsonify({'error': 'JSON with key "equity" required for POST'}), 400
+            equity = payload.get('equity')
+            index = payload.get('index')
+            if index:
+                ser = pd.Series(equity, index=pd.to_datetime(index))
+            else:
+                ser = pd.Series(equity)
+        else:
+            # GET: try reading the saved CSV
+            try:
+                df = pd.read_csv('multi_vectorbt_combined_equity.csv', index_col=0, parse_dates=True)
+                # detect column name
+                if 'equity' in df.columns:
+                    ser = df['equity']
+                else:
+                    # take first column
+                    ser = df.iloc[:, 0]
+            except Exception as e:
+                return jsonify({'error': 'No combined equity CSV found and no payload provided', 'exc': str(e)}), 400
+
+        # Plot
+        plt.figure(figsize=(10, 4))
+        ser.plot(title='Combined Equity')
+        plt.xlabel('Time')
+        plt.ylabel('Equity')
+        plt.grid(True)
+        buf = BytesIO()
+        plt.tight_layout()
+        plt.savefig(buf, format='png', dpi=150)
+        plt.close()
+        buf.seek(0)
+        return send_file(buf, mimetype='image/png')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def generate_pnl_drawdown_chart(combined_equity: pd.Series, init_cash: float) -> str:
+    """
+    Génère un graphique avec PNL (vert) et Drawdown (rouge) combinés.
+    
+    Args:
+        combined_equity: Série temporelle de l'équité combinée
+        init_cash: Capital initial (utilisé pour référence seulement)
+        
+    Returns:
+        String base64 du graphique PNG
+    """
+    fig, ax1 = plt.subplots(figsize=(14, 7))
+    
+    # CORRECTION: Utiliser la valeur initiale réelle de combined_equity
+    actual_start = combined_equity.iloc[0]
+    
+    # Calculer le PNL en pourcentage par rapport au capital RÉELLEMENT investi
+    pnl_pct = ((combined_equity - actual_start) / actual_start) * 100
+    
+    # Calculer le drawdown en pourcentage
+    peak = combined_equity.cummax()
+    drawdown_pct = ((combined_equity - peak) / peak) * 100
+    
+    # Axe principal : PNL (vert)
+    color_pnl = '#00ff88'
+    ax1.set_xlabel('Date', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('PNL (%)', fontsize=12, fontweight='bold', color=color_pnl)
+    line1 = ax1.plot(pnl_pct.index, pnl_pct.values, color=color_pnl, linewidth=2, label='PNL (%)', alpha=0.9)
+    ax1.tick_params(axis='y', labelcolor=color_pnl)
+    ax1.axhline(y=0, color='white', linestyle='--', linewidth=1, alpha=0.3)
+    ax1.grid(True, alpha=0.2, linestyle='--')
+    
+    # Axe secondaire : Drawdown (rouge)
+    ax2 = ax1.twinx()
+    color_dd = '#ff4444'
+    ax2.set_ylabel('Drawdown (%)', fontsize=12, fontweight='bold', color=color_dd)
+    line2 = ax2.plot(drawdown_pct.index, drawdown_pct.values, color=color_dd, linewidth=2, label='Drawdown (%)', alpha=0.9)
+    ax2.tick_params(axis='y', labelcolor=color_dd)
+    ax2.fill_between(drawdown_pct.index, drawdown_pct.values, 0, color=color_dd, alpha=0.15)
+    
+    # Titre et légende
+    final_pnl_pct = pnl_pct.iloc[-1]
+    max_dd_pct = drawdown_pct.min()
+    plt.title(f'Portfolio Performance - PNL: {final_pnl_pct:,.2f}% | Max DD: {max_dd_pct:,.2f}%', 
+              fontsize=14, fontweight='bold', pad=20)
+    
+    # Combiner les légendes
+    lines = line1 + line2
+    labels = [l.get_label() for l in lines]
+    ax1.legend(lines, labels, loc='upper left', fontsize=10, framealpha=0.9)
+    
+    # Style sombre
+    fig.patch.set_facecolor('#0a0e27')
+    ax1.set_facecolor('#1a1f3a')
+    ax1.spines['top'].set_visible(False)
+    ax2.spines['top'].set_visible(False)
+    for spine in ['bottom', 'left', 'right']:
+        ax1.spines[spine].set_color('#4fc3f7')
+        ax2.spines[spine].set_color('#4fc3f7')
+    ax1.tick_params(colors='white')
+    ax2.tick_params(colors='white')
+    ax1.xaxis.label.set_color('white')
+    
+    plt.tight_layout()
+    
+    # Convertir en base64
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png', dpi=100, facecolor='#0a0e27')
+    buffer.seek(0)
+    image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+    plt.close(fig)
+    
+    return image_base64
+
+
+@app.route('/backtest-custom-strategy', methods=['POST'])
+def backtest_custom_strategy():
+    """
+    Upload un fichier de stratégie Python et lance un backtest vectorbt.
+    
+    Form-data attendu:
+    - strategy_file: fichier .py contenant la stratégie
+    - bases: liste de bases séparées par virgule (ex: "BTC,ETH")
+    - exchange: (optionnel) exchange à forcer, sinon fusion multi-exchange
+    - timeframe: (défaut: 1h)
+    - start: date de début (format: YYYY-MM-DD)
+    - end: date de fin (format: YYYY-MM-DD)
+    - init_cash: capital initial (défaut: 10000)
+    - fee: frais de trading (défaut: 0.0)
+    - slippage: slippage (défaut: 0.0)
+    - strategy_class: nom de la classe de stratégie (défaut: recherche auto)
+    """
+    try:
+        # Vérifier la présence du fichier
+        if 'strategy_file' not in request.files:
+            return jsonify({'error': 'Aucun fichier strategy_file fourni'}), 400
+        
+        file = request.files['strategy_file']
+        if file.filename == '':
+            return jsonify({'error': 'Nom de fichier vide'}), 400
+        
+        if not file.filename.endswith('.py'):
+            return jsonify({'error': 'Le fichier doit être un fichier Python (.py)'}), 400
+        
+        # Récupérer les paramètres
+        bases = request.form.get('bases', 'BTC').strip()
+        exchange = request.form.get('exchange', None)
+        timeframe = request.form.get('timeframe', '1h')
+        start = request.form.get('start', '2023-01-01')
+        end = request.form.get('end', '2024-01-01')
+        init_cash = float(request.form.get('init_cash', 10000))
+        fee = float(request.form.get('fee', 0.0))
+        slippage = float(request.form.get('slippage', 0.0))
+        strategy_class_name = request.form.get('strategy_class', None)
+        max_active_trades = request.form.get('max_active_trades', None)
+        
+        print(f"🔍 DEBUG - max_active_trades brut: '{max_active_trades}'")
+        
+        if max_active_trades and max_active_trades.strip():
+            max_active_trades = int(max_active_trades)
+            print(f"✅ Max Active Trades converti: {max_active_trades}")
+        else:
+            max_active_trades = None
+            print(f"⚠️  Max Active Trades vide ou None")
+        
+        # Sauvegarder temporairement le fichier de stratégie
+        run_id = str(uuid.uuid4())[:8]
+        strategy_filename = f"custom_strategy_{run_id}.py"
+        strategy_path = os.path.join(tempfile.gettempdir(), strategy_filename)
+        
+        file.save(strategy_path)
+        print(f"✅ Stratégie sauvegardée: {strategy_path}")
+        
+        # Charger dynamiquement la stratégie
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(f"strategy_{run_id}", strategy_path)
+        strategy_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(strategy_module)
+        
+        # Trouver la classe de stratégie
+        if strategy_class_name:
+            if not hasattr(strategy_module, strategy_class_name):
+                return jsonify({'error': f'Classe {strategy_class_name} non trouvée dans le fichier'}), 400
+            strategy_class = getattr(strategy_module, strategy_class_name)
+        else:
+            # Chercher automatiquement une classe qui ressemble à une stratégie
+            strategy_class = None
+            for name in dir(strategy_module):
+                obj = getattr(strategy_module, name)
+                if isinstance(obj, type) and 'Strategy' in name:
+                    strategy_class = obj
+                    strategy_class_name = name
+                    break
+            
+            if strategy_class is None:
+                return jsonify({'error': 'Aucune classe de stratégie trouvée. Spécifiez strategy_class ou nommez votre classe avec "Strategy"'}), 400
+        
+        print(f"✅ Classe de stratégie chargée: {strategy_class_name}")
+        
+        # Importer run_multi_backtest
+        try:
+            from run_multi_vectorbt import run_multi_backtest
+        except ImportError:
+            return jsonify({'error': 'Module run_multi_vectorbt non disponible'}), 500
+        
+        # Parser les bases
+        bases_list = [b.strip().upper() for b in bases.split(',') if b.strip()]
+        
+        if not bases_list:
+            return jsonify({'error': 'Au moins une base est requise'}), 400
+        
+        # Convertir exchange vide en None pour multi-exchange fusion
+        exchange_to_use = exchange if exchange and exchange.strip() else None
+        
+        print(f"🚀 Lancement du backtest:")
+        print(f"   Bases: {bases_list}")
+        print(f"   Exchange: {exchange_to_use or 'fusion multi-exchange'}")
+        print(f"   Période: {start} → {end}")
+        print(f"   Timeframe: {timeframe}")
+        print(f"   Capital: {init_cash}")
+        print(f"   Fees: {fee}, Slippage: {slippage}")
+        if max_active_trades:
+            print(f"   Max Active Trades: {max_active_trades}")
+        
+        # Extraire les paramètres SmartBot V2 DCA (optionnels)
+        dsc_mode = request.form.get('dsc_mode')
+        rsi_length = request.form.get('rsi_length')
+        rsi_threshold = request.form.get('rsi_threshold')
+        bb_length = request.form.get('bb_length')
+        bb_mult = request.form.get('bb_mult')
+        bb_threshold = request.form.get('bb_threshold')
+        mfi_length = request.form.get('mfi_length')
+        mfi_threshold = request.form.get('mfi_threshold')
+        atr_length = request.form.get('atr_length')
+        atr_mult = request.form.get('atr_mult')
+        
+        # Construire le dict de paramètres supplémentaires
+        extra_params = {}
+        
+        # Ajouter les paramètres SmartBot V2
+        if dsc_mode:
+            extra_params['dsc_mode'] = dsc_mode
+            print(f"   🤖 DSC Mode: {dsc_mode}")
+        if rsi_length:
+            extra_params['rsi_length'] = int(rsi_length)
+            print(f"   📊 RSI Length: {rsi_length}")
+        if rsi_threshold:
+            extra_params['rsi_threshold'] = float(rsi_threshold)
+            print(f"   📉 RSI Threshold: {rsi_threshold}")
+        if bb_length:
+            extra_params['bb_length'] = int(bb_length)
+            print(f"   📊 BB Length: {bb_length}")
+        if bb_mult:
+            extra_params['bb_mult'] = float(bb_mult)
+            print(f"   📊 BB Multiplier: {bb_mult}")
+        if bb_threshold:
+            extra_params['bb_threshold'] = float(bb_threshold)
+            print(f"   📉 BB Threshold: {bb_threshold}")
+        if mfi_length:
+            extra_params['mfi_length'] = int(mfi_length)
+            print(f"   💰 MFI Length: {mfi_length}")
+        if mfi_threshold:
+            extra_params['mfi_threshold'] = float(mfi_threshold)
+            print(f"   📉 MFI Threshold: {mfi_threshold}")
+        if atr_length:
+            extra_params['atr_length'] = int(atr_length)
+            print(f"   📊 ATR Length: {atr_length}")
+        if atr_mult:
+            extra_params['atr_mult'] = float(atr_mult)
+            print(f"   📊 ATR Multiplier: {atr_mult}")
+        
+        # Extraire les nouveaux paramètres DCA complets
+        base_order = request.form.get('base_order')
+        safe_order = request.form.get('safe_order')
+        max_safe_order = request.form.get('max_safe_order')
+        safe_order_volume_scale = request.form.get('safe_order_volume_scale')
+        pricedevbase = request.form.get('pricedevbase')
+        price_deviation = request.form.get('price_deviation')
+        deviation_scale = request.form.get('deviation_scale')
+        atr_smoothing = request.form.get('atr_smoothing')
+        take_profit_pct = request.form.get('take_profit')
+        tp_type = request.form.get('tp_type')
+        dsc2_enabled = request.form.get('dsc2_enabled')
+        dsc2 = request.form.get('dsc2')
+        
+        # Ajouter les paramètres DCA complets
+        if base_order:
+            extra_params['base_order'] = float(base_order)
+            print(f"   💵 Base Order: ${base_order}")
+        if safe_order:
+            extra_params['safe_order'] = float(safe_order)
+            print(f"   💵 Safety Order: ${safe_order}")
+        if max_safe_order:
+            extra_params['max_safe_order'] = int(max_safe_order)
+            print(f"   🔢 Max Safety Orders: {max_safe_order}")
+        if safe_order_volume_scale:
+            extra_params['safe_order_volume_scale'] = float(safe_order_volume_scale)
+            print(f"   📈 SO Volume Scale: {safe_order_volume_scale}")
+        if pricedevbase:
+            extra_params['pricedevbase'] = pricedevbase
+            print(f"   📉 Price Deviation Type: {pricedevbase}")
+        if price_deviation:
+            extra_params['price_deviation'] = float(price_deviation)
+            print(f"   📉 Price Deviation: {price_deviation}%")
+        if deviation_scale:
+            extra_params['deviation_scale'] = float(deviation_scale)
+            print(f"   📊 Deviation Scale: {deviation_scale}")
+        if atr_smoothing:
+            extra_params['atr_smoothing'] = int(atr_smoothing)
+            print(f"   📊 ATR Smoothing: {atr_smoothing}")
+        if take_profit_pct:
+            extra_params['take_profit'] = float(take_profit_pct)
+            print(f"   🎯 Take Profit: {take_profit_pct}%")
+        if tp_type:
+            extra_params['tp_type'] = tp_type
+            print(f"   🎯 TP Type: {tp_type}")
+        if dsc2_enabled is not None:
+            extra_params['dsc2_enabled'] = dsc2_enabled.lower() == 'true'
+            print(f"   🔀 DSC2 Enabled: {dsc2_enabled}")
+        if dsc2:
+            extra_params['dsc2'] = dsc2
+            print(f"   🔀 DSC2 Condition: {dsc2}")
+
+        
+        # Créer une référence de stratégie pour run_multi_backtest
+        # Format: chemin_fichier:NomClasse
+        strategy_ref = f"{strategy_path}:{strategy_class_name}"
+        
+        # Lancer le backtest
+        per_stats, combined_stats, eq_df, combined_equity = run_multi_backtest(
+            bases=bases_list,
+            exchange=exchange_to_use,
+            timeframe=timeframe,
+            init_cash=init_cash,
+            start=start,
+            end=end,
+            weights=None,
+            fee=fee,
+            slippage=slippage,
+            max_active_trades=max_active_trades,
+            strategy_ref=strategy_ref,
+            strategy_params=extra_params  # Nouveaux paramètres DCA
+        )
+        
+        # Nettoyer le fichier temporaire
+        try:
+            os.remove(strategy_path)
+        except:
+            pass
+        
+        # Fonction helper pour convertir les valeurs NaN en 0
+        def safe_float(value, default=0.0):
+            """Convertit en float, retourne default si NaN"""
+            try:
+                val = float(value)
+                return default if pd.isna(val) or np.isnan(val) or np.isinf(val) else val
+            except (ValueError, TypeError):
+                return default
+        
+        def safe_int(value, default=0):
+            """Convertit en int, retourne default si NaN"""
+            try:
+                val = float(value)
+                return default if pd.isna(val) or np.isnan(val) or np.isinf(val) else int(val)
+            except (ValueError, TypeError):
+                return default
+        
+        # Préparer la réponse
+        result = {
+            'run_id': run_id,
+            'status': 'success',
+            'strategy_class': strategy_class_name,
+            'bases': bases_list,
+            'exchange': exchange or 'multi-exchange fusion',
+            'period': f"{start} → {end}",
+            'timeframe': timeframe,
+            'combined_stats': {
+                'start_value': safe_float(combined_stats['Start Value']),
+                'end_value': safe_float(combined_stats['End Value']),
+                'total_return_pct': safe_float(combined_stats['Total Return [%]']),
+                'max_drawdown_pct': safe_float(combined_stats['Max Drawdown [%]']),
+                'num_assets_requested': safe_int(combined_stats['Num Assets Requested']),
+                'num_assets_with_data': safe_int(combined_stats['Num Assets With Data']),
+                'num_assets_active': safe_int(combined_stats['Num Assets Active']),
+                'num_assets_no_data': safe_int(combined_stats['Num Assets No Data']),
+                'num_assets_no_signals': safe_int(combined_stats['Num Assets No Signals']),
+                'skipped_assets_no_data': combined_stats.get('Skipped Assets (No Data)', 'None'),
+                'skipped_assets_no_signals': combined_stats.get('Skipped Assets (No Signals)', 'None')
+            },
+            'per_asset_stats': {}
+        }
+        # Ajouter les stats par asset
+        # Note: per_stats peut avoir plusieurs lignes (une par asset)
+        # On doit trouver la ligne correspondant à chaque asset
+        for col in per_stats.columns:
+            if '_Start Value' in col:
+                base = col.replace('_Start Value', '')
+                # Trouver la ligne où les colonnes de cet asset ont des valeurs non-NaN
+                asset_row = None
+                for idx in range(len(per_stats)):
+                    if pd.notna(per_stats[f'{base}_Start Value'].iloc[idx]):
+                        asset_row = idx
+                        break
+                
+                if asset_row is not None:
+                    result['per_asset_stats'][base] = {
+                        'start_value': safe_float(per_stats[f'{base}_Start Value'].iloc[asset_row]),
+                        'end_value': safe_float(per_stats[f'{base}_End Value'].iloc[asset_row]),
+                        'total_return_pct': safe_float(per_stats[f'{base}_Total Return [%]'].iloc[asset_row]),
+                        'max_drawdown_pct': safe_float(per_stats[f'{base}_Max Drawdown [%]'].iloc[asset_row]),
+                        'total_trades': safe_int(per_stats[f'{base}_Total Trades'].iloc[asset_row]),
+                        'win_rate_pct': safe_float(per_stats[f'{base}_Win Rate [%]'].iloc[asset_row]),
+                        'profit_factor': safe_float(per_stats[f'{base}_Profit Factor'].iloc[asset_row], 0.0)
+                    }
+        
+        # Générer le graphique PNL + Drawdown
+        print("📊 Génération du graphique PNL/Drawdown...")
+        chart_base64 = generate_pnl_drawdown_chart(combined_equity, init_cash)
+        result['chart'] = f"data:image/png;base64,{chart_base64}"
+        
+        print(f"✅ Backtest terminé avec succès!")
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        import traceback
+        print(f"❌ Erreur lors du backtest: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
 
 # -----------------------------------------------------------------------------
 # CLASSE DCA STRATEGY (inspirée de dca_library_backtestingpy.py)
@@ -2512,7 +3023,7 @@ def report():
     <h2>Trade Details</h2>
     <table>
         <tr><th>Entry Date</th><th>Entry Price</th><th>Exit Date</th><th>Exit Price</th><th>PnL</th><th>Return %</th></tr>
-        {''.join([f"<tr><td>{trade.get('entry_time', 'N/A')}</td><td>{trade.get('entry_price', 0):.4f}</td><td>{trade.get('exit_time', 'N/A')}</td><td>{trade.get('exit_price', 0):.4f}</td><td class=\"{{'positive' if trade.get('pnl', 0) >= 0 else 'negative'}}\">{trade.get('pnl', 0):.2f}</td><td class=\"{{'positive' if trade.get('return_pct', 0) >= 0 else 'negative'}}\">{trade.get('return_pct', 0):.2f}%</td></tr>" for trade in trades_data]) if trades_data else '<tr><td colspan="6">No trades executed</td></tr>'}
+        {trades_rows}
     </table>
     
 </body>
@@ -2751,6 +3262,36 @@ def download_image(run_id, image_type):
         
     return send_file(image_path, as_attachment=True)
 
+
+# -----------------------------------------------------------------------------
+# ROUTES POUR SERVIR LES FICHIERS HTML STATIQUES
+# -----------------------------------------------------------------------------
+
+@app.route('/')
+def index():
+    """Page d'accueil - Upload Strategy"""
+    from flask import redirect
+    return redirect('/upload_strategy.html')
+
+
+@app.route('/<path:filename>')
+def serve_static(filename):
+    """Sert les fichiers HTML du dossier front/"""
+    import os
+    from flask import send_from_directory
+    
+    # Chemin vers le dossier front (un niveau au-dessus de datafeed_tester)
+    front_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'front'))
+    
+    # Vérifier si le fichier existe
+    file_path = os.path.join(front_dir, filename)
+    if os.path.exists(file_path):
+        return send_from_directory(front_dir, filename)
+    
+    # Si le fichier n'existe pas, retourner 404
+    return jsonify({"error": f"Fichier {filename} non trouvé"}), 404
+
+
 # -----------------------------------------------------------------------------
 # POINT D'ENTRÉE
 # -----------------------------------------------------------------------------
@@ -2758,10 +3299,16 @@ def download_image(run_id, image_type):
 if __name__ == "__main__":
     print("🚀 Démarrage de l'API Kronos...")
     print("📖 Documentation disponible sur: http://localhost:5002")
-    print("🔧 Routes disponibles:")
+    print("🌐 Interface Web disponible sur:")
+    print("   http://localhost:5002/upload_strategy.html")
+    print("   http://localhost:5002/run_multi.html")
+    print("")
+    print("🔧 Routes API disponibles:")
     print("   GET  /health")
     print("   GET  /strategies")
     print("   POST /ingest-score")
     print("   POST /backtest")
     print("   POST /report")
+    print("   POST /run-multi-backtest")
+    print("   POST /backtest-custom-strategy")
     app.run(debug=False, host="0.0.0.0", port=5002)

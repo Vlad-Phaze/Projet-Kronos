@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Run Multi Backtest</title>
+  <style>
+    body{font-family:Arial;padding:16px;background:#0a0e27;color:#e0e0e0;} 
+    .container{max-width:900px;margin:0 auto;background:#1a1f3a;padding:30px;border-radius:8px;}
+    h2{color:#4fc3f7;border-bottom:2px solid #2a3f5f;padding-bottom:10px;margin-bottom:20px;}
+    label{display:block;margin-top:12px;color:#b0b0b0;font-size:0.9em;}
+    input,select{width:100%;padding:10px;margin-top:5px;background:#0a0e27;border:1px solid #2a3f5f;border-radius:4px;color:#e0e0e0;font-family:Arial;}
+    button{width:100%;padding:12px;margin-top:16px;background:#4fc3f7;color:#0a0e27;border:none;border-radius:4px;font-size:16px;font-weight:600;cursor:pointer;}
+    button:hover{background:#29b6f6;}
+    pre{background:#0a0e27;padding:15px;border-radius:4px;border:1px solid #2a3f5f;overflow:auto;color:#e0e0e0;}
+    img{max-width:100%;border-radius:4px;border:1px solid #2a3f5f;}
+    .nav-links{margin-bottom:20px;}
+    .nav-links a{color:#4fc3f7;text-decoration:none;margin-right:20px;}
+    .nav-links a:hover{text-decoration:underline;}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>KRONOS BACKTESTER - Multi Asset</h2>
+    
+    <div class="nav-links">
+      <a href="index.html">← Retour au Dashboard</a>
+      <a href="upload_strategy.html">📤 Upload Custom Strategy</a>
+    </div>
+  <label>Bases (comma): <input id="bases" value="BTC,ETH"></label>
+  <label>Weights (comma, optional): <input id="weights" value="0.7,0.3"></label>
+  <label>Init cash: <input id="init" value="1000000"></label>
+  <label>Start: <input id="start" value="2025-01-01"></label>
+  <label>End: <input id="end" value="2025-12-31"></label>
+  <label>Exchange: <input id="exchange" value="binance"></label>
+  <label>Fee: <input id="fee" value="0.0004"></label>
+  <label>Slippage: <input id="slippage" value="0.001"></label>
+  <button id="run">Run backtest</button>
+
+  <h3 style="color:#4fc3f7;margin-top:30px;">Results</h3>
+  <pre id="out"></pre>
+  <h3 style="color:#4fc3f7;margin-top:30px;">Combined equity</h3>
+  <img id="chart" src="" alt="equity chart will appear here" style="max-width:100%"/>
+  </div>
+
+  <script>
+    document.getElementById('run').addEventListener('click', async () => {
+      const payload = {
+        bases: document.getElementById('bases').value,
+        weights: document.getElementById('weights').value,
+        init_cash: Number(document.getElementById('init').value),
+        start: document.getElementById('start').value,
+        end: document.getElementById('end').value,
+        exchange: document.getElementById('exchange').value,
+        fee: Number(document.getElementById('fee').value),
+        slippage: Number(document.getElementById('slippage').value)
+      };
+      document.getElementById('out').textContent = 'Running... this may take a while';
+      try{
+        const res = await fetch('/run-multi-backtest', {
+          method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+        });
+        const j = await res.json();
+        if(!j.ok){ document.getElementById('out').textContent = JSON.stringify(j); return; }
+        document.getElementById('out').textContent = JSON.stringify(j.combined_stats, null, 2);
+        // load chart
+        const img = document.getElementById('chart');
+        img.src = '/plot-combined-equity?ts=' + Date.now();
+      }catch(e){ document.getElementById('out').textContent = String(e); }
+    });
+  </script>
+</body>
+</html>

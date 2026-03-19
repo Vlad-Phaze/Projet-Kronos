@@ -17,7 +17,7 @@ class ParametresDCA_Exact:
     volume_scale: float = 1.0  # so_volume_scale = 1
     deviation_premier_so: float = 0.0021  # so_step = 0.0021
     step_scale: float = 1.0  # so_step_scale = 1
-    take_profit_pourcent: float = 0.01
+    take_profit_pourcent: float = 0.03  # 3% Take Profit
     stop_loss_pourcent: Optional[float] = None
     commission: float = 0.002
     slippage_pourcent: float = 0.0
@@ -25,12 +25,12 @@ class ParametresDCA_Exact:
     
     # Paramètres IDENTIQUES à dca_library_backtestingpy.py
     rsi_length: int = 14
-    rsi_entry: int = 30
+    rsi_entry: int = 20  # Nouveau: RSI < 20 pour entrée
     rsi_exit: int = 75
     bb_length: int = 20
     bb_std: float = 3.0  # bb_std = 3 dans dca_library
     bbp_trigger: float = 0.2
-    tp_minimum: float = 0.01  # min_tp = 0.01
+    tp_minimum: float = 0.03  # min_tp = 0.03 (3%)
 
 
 def calculer_indicateurs_exact(prix_df: pd.DataFrame, parametres: ParametresDCA_Exact) -> Tuple[np.ndarray, np.ndarray]:
@@ -125,9 +125,9 @@ def backtest_dca_exact(prix: pd.DataFrame, signal_entree: pd.Series, parametres:
             avg_price = total_cost / total_qty
             pnl = (price - avg_price) / avg_price  # position.is_long = True
             
-            # CONDITIONS DE SORTIE (EXACTEMENT comme dca_library)
-            # Condition: (rsi > rsi_exit and pnl >= min_tp)
-            if rsi > parametres.rsi_exit and pnl >= parametres.tp_minimum:
+            # CONDITIONS DE SORTIE - Uniquement Take Profit 3%
+            # Condition: pnl >= 3% (plus de condition RSI)
+            if pnl >= parametres.tp_minimum:
                 # Sortie de position
                 position = False
                 
@@ -166,11 +166,10 @@ def backtest_dca_exact(prix: pd.DataFrame, signal_entree: pd.Series, parametres:
                 step_scaled = parametres.deviation_premier_so * (parametres.step_scale ** len(safety_orders))
                 price_deviation = abs((last_so_price - price) / last_so_price)
                 
-                # Conditions EXACTES de dca_library
-                bbp_ok = bbp < parametres.bbp_trigger  # position longue
+                # Conditions pour Safety Orders - SEULEMENT déviation de prix
                 deviation_ok = price_deviation >= step_scaled
                 
-                if deviation_ok and bbp_ok:
+                if deviation_ok:  # Plus de condition BBP pour les Safety Orders
                     qty = parametres.quantite_base * (parametres.volume_scale ** len(safety_orders))
                     total_cost += price * qty
                     total_qty += qty

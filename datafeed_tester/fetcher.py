@@ -8,6 +8,11 @@ __all__ = [
 
 from typing import List, Dict, Optional, Tuple
 import math
+import threading
+
+# Compteur global pour tracer les appels API
+_api_call_counter = 0
+_api_call_lock = threading.Lock()
 import time
 from datetime import datetime, timedelta, timezone
 import difflib
@@ -282,8 +287,14 @@ def pick_tradable_pair_on_exchange(exchange_id: str,
                 return pair.split("/")[1]
             except Exception:
                 return ""
-        sorted_cands = sorted(candidates, key=lambda p: (preferred_quotes.index(quote_of(p))
-                                                         if quote_of(p) in preferred_quotes else len(preferred_quotes)))
+        
+        # BITSTAMP: Forcer USDT au lieu de USD pour correspondre aux autres exchanges
+        quotes_to_use = preferred_quotes
+        if exchange_id.lower() == "bitstamp":
+            quotes_to_use = ("USDT", "USDC", "USD", "EUR", "BTC")
+        
+        sorted_cands = sorted(candidates, key=lambda p: (quotes_to_use.index(quote_of(p))
+                                                         if quote_of(p) in quotes_to_use else len(quotes_to_use)))
         return {"pair": sorted_cands[0], "alternatives": sorted_cands[1:]}
     except Exception as e:
         log_error(errors, "pick_tradable_pair_on_exchange",
@@ -297,6 +308,7 @@ def pick_tradable_pair_on_exchange(exchange_id: str,
 def fetch_ohlcv_ccxt(exchange_id: str, symbol: str, timeframe: str,
                      since_ms: int, until_ms: int, limit: int = 1000,
                      errors: Optional[List[Dict]] = None) -> pd.DataFrame:
+    global _api_call_counter
     try:
         cls = getattr(ccxt, exchange_id)
         ex = cls({"enableRateLimit": True})
@@ -317,6 +329,9 @@ def fetch_ohlcv_ccxt(exchange_id: str, symbol: str, timeframe: str,
         data = []
         cursor = since_ms
         while cursor < until_ms:
+            with _api_call_lock:
+                _api_call_counter += 1
+                print(f'      🌐 API Call #{_api_call_counter}: {exchange_id} - {symbol}', flush=True)
             batch = ex.fetch_ohlcv(symbol, timeframe=timeframe, since=cursor, limit=limit)
             if not batch:
                 break
@@ -558,7 +573,9 @@ def compare_exchanges_on_bases(exchanges: List[str],
                                allowed_exchanges: Optional[List[str]] = None,
                                selection: str = "best",                # "best" ou "fixed"
                                fixed_exchange: Optional[str] = None,   # si selection="fixed"
-                               include_derivatives: bool = False):
+                               include_derivatives: bool = False,
+                               since_ms: Optional[int] = None,
+                               until_ms: Optional[int] = None):
     """
     - allowed_exchanges: filtre (ex: ["kraken","coinbase"])
     - selection:
@@ -567,13 +584,30 @@ def compare_exchanges_on_bases(exchanges: List[str],
     - fixed_exchange: id ccxt (ex: "kraken") si selection="fixed".
     - Retourne (agg, detail, data); provenance lisible dans data["__FINAL_META__"][base]["provenance"].
     """
+    global _api_call_counter
+    with _api_call_lock:
+        _api_call_counter = 0  # Reset du compteur
+    
+    print(f'   🌐 FETCHER CALLED: {len(bases)} bases x {len(exchanges)} exchanges = {len(bases) * len(exchanges)} potential API calls')
     errors: List[Dict] = []
 
-    # 0) Fenêtre
-    until = datetime.now(timezone.utc)
-    since = until - timedelta(days=lookback_days)
-    since_ms = int(since.timestamp() * 1000)
-    until_ms = int(until.timestamp() * 1000)
+    # 0) Fenêtre: allow caller to pass explicit since_ms/until_ms (ms). Otherwise fall back to now - lookback_days
+    if since_ms is not None and until_ms is not None:
+        # use provided ms values
+        since_dt = datetime.fromtimestamp(since_ms / 1000.0, tz=timezone.utc)
+        until_dt = datetime.fromtimestamp(until_ms / 1000.0, tz=timezone.utc)
+        since = since_dt
+        until = until_dt
+    else:
+        until = datetime.now(timezone.utc)
+        since = until - timedelta(days=lookback_days)
+        since_ms = int(since.timestamp() * 1000)
+        until_ms = int(until.timestamp() * 1000)
+    # ensure since_ms/until_ms are available for downstream calls
+    if since_ms is None:
+        since_ms = int(since.timestamp() * 1000)
+    if until_ms is None:
+        until_ms = int(until.timestamp() * 1000)
     tf_ms = timeframe_to_ms(timeframe)
 
     # 1) Résolution des bases
@@ -734,6 +768,8 @@ def compare_exchanges_on_bases(exchanges: List[str],
     else:
         agg = pd.DataFrame(columns=["exchange","mean_score"])
 
+    print(f'   ✅ FETCHER COMPLETE: Total API calls made = {_api_call_counter}', flush=True)
+    
     return agg, detail, data
 
 # =========================
