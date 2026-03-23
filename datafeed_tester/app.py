@@ -6,6 +6,13 @@ Utilise fetcher.py pour la récupération multi-sources et backtester amélioré
 
 import sys
 import os
+
+# Configuration UTF-8 pour Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import importlib
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -17,12 +24,12 @@ for module in modules_to_reload:
         del sys.modules[module]
         print(f"   ✅ Module {module} supprimé")
 
-print("📥 Import FRAIS du backtester EXACT (optional)...")
-backtest_dca_exact = None
+print("📥 Import FRAIS du backtester SmartBot V2...")
+backtest_smartbot_v2 = None
 try:
     import backtester_exact
-    from backtester_exact import backtest_dca_exact
-    print("✅ Backtester EXACT importé avec succès")
+    from backtester_exact import backtest_smartbot_v2
+    print("✅ Backtester SmartBot V2 importé avec succès")
 except Exception as e:
     print(f"⚠️ backtester_exact import failed (continuing without it): {e}")
 
@@ -51,7 +58,7 @@ from flask_cors import CORS
 import importlib
 import backtester_exact
 importlib.reload(backtester_exact)  # Force reload pour nouvelles signatures
-from backtester_exact import ParametresDCA_Exact, backtest_dca_exact
+from backtester_exact import ParametresDCA_SmartBotV2, backtest_smartbot_v2
 
 # Import du fetcher multi-source
 from fetcher import compare_exchanges_on_bases, expand_coin_inputs, EXCHANGES
@@ -1980,6 +1987,22 @@ def backtest():
             if df.empty:
                 return jsonify({"error": f"Aucune donnée récupérée pour {base_symbol}"}), 400
             
+            # Définir l'index datetime AVANT tout le reste
+            # Le fetcher retourne une colonne 'date' déjà convertie en datetime
+            if 'date' in df.columns:
+                df = df.set_index('date')
+            elif 'timestamp' in df.columns:
+                df.index = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+                df = df.drop('timestamp', axis=1, errors='ignore')
+            
+            # S'assurer que l'index est un DatetimeIndex
+            if not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index)
+            
+            # Supprimer la colonne timestamp si elle existe encore
+            if 'timestamp' in df.columns:
+                df = df.drop('timestamp', axis=1)
+            
             # Vérification des colonnes nécessaires
             required_cols = ['open', 'high', 'low', 'close', 'volume']
             if not all(col in df.columns for col in required_cols):
@@ -1994,14 +2017,10 @@ def backtest():
                 'volume': 'Volume'
             })
             
-            # Conversion de l'index timestamp vers datetime si nécessaire
-            if 'date' in df.columns:
-                df = df.set_index('date')
-            elif 'timestamp' in df.columns:
-                df['date'] = pd.to_datetime(df['timestamp'], unit='ms')
-                df = df.set_index('date')
-            
-            print(f"✅ Données récupérées via fetcher: {len(df)} points de {df.index[0].date()} à {df.index[-1].date()}")
+            # Affichage sécurisé
+            start_str = df.index[0].strftime('%Y-%m-%d %H:%M') if hasattr(df.index[0], 'strftime') else str(df.index[0])
+            end_str = df.index[-1].strftime('%Y-%m-%d %H:%M') if hasattr(df.index[-1], 'strftime') else str(df.index[-1])
+            print(f"✅ Données récupérées via fetcher: {len(df)} points de {start_str} à {end_str}")
             print(f"🔗 Source: {data['__FINAL_META__'][base_symbol]['provenance']}")
             
         except Exception as e:
@@ -3286,10 +3305,262 @@ def serve_static(filename):
     # Vérifier si le fichier existe
     file_path = os.path.join(front_dir, filename)
     if os.path.exists(file_path):
-        return send_from_directory(front_dir, filename)
+        response = send_from_directory(front_dir, filename)
+        # Headers pour empêcher le cache
+        if hasattr(response, 'headers'):
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+        return response
     
     # Si le fichier n'existe pas, retourner 404
     return jsonify({"error": f"Fichier {filename} non trouvé"}), 404
+
+
+# -----------------------------------------------------------------------------
+# ENDPOINT SMARTBOT V2
+# -----------------------------------------------------------------------------
+
+@app.route('/backtest-smartbot-v2', methods=['POST'])
+def backtest_smartbot_v2_endpoint():
+    """
+    Endpoint pour backtester SmartBot V2 avec configuration complète
+    """
+    try:
+        data = request.json
+        
+        # Récupération des données de marché
+        symbol = data.get('symbol', 'BTC')
+        quote = data.get('quote', 'USD')
+        exchange_name = data.get('exchange', 'binance')
+        timeframe = data.get('timeframe', '1d')
+        start_date = data.get('start_date', '2024-01-01')
+        end_date = data.get('end_date', '2025-01-01')
+        
+        print(f"📊 Backtest SmartBot V2: {symbol}-{quote} sur {exchange_name}")
+        print(f"📅 Période demandée: {start_date} → {end_date}")
+        
+        # Convertir les dates en timestamps milliseconds pour le fetcher
+        from datetime import datetime as dt, timezone
+        try:
+            start_dt = dt.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+            end_dt = dt.strptime(end_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+            since_ms = int(start_dt.timestamp() * 1000)
+            until_ms = int(end_dt.timestamp() * 1000)
+            print(f"🕐 Timestamps: since_ms={since_ms}, until_ms={until_ms}")
+        except Exception as e:
+            print(f"❌ Erreur de conversion des dates: {e}")
+            return jsonify({"error": f"Format de date invalide: {e}"}), 400
+        
+        # Mapper les timeframes pour le fetcher CCXT
+        timeframe_map = {
+            '1m': '1m',
+            '5m': '5m',
+            '15m': '15m',
+            '1h': '1h',
+            '4h': '4h',
+            '1d': '1d'
+        }
+        tf = timeframe_map.get(timeframe, '1d')
+        
+        # Téléchargement des données via le fetcher multi-sources
+        print(f"🔄 Téléchargement {symbol} via fetcher multi-sources (timeframe={tf}, {start_date} → {end_date})")
+        
+        try:
+            # Utilisation du fetcher avec les meilleurs exchanges
+            exchanges_list = ['binance', 'coinbase', 'kraken', 'kucoin', 'okx']
+            if exchange_name.lower() in exchanges_list:
+                # Mettre l'exchange choisi en priorité
+                exchanges_list = [exchange_name.lower()] + [e for e in exchanges_list if e != exchange_name.lower()]
+            
+            agg, detail, fetch_data = compare_exchanges_on_bases(
+                exchanges=exchanges_list,
+                bases=[symbol],
+                timeframe=tf,
+                lookback_days=365,  # Paramètre requis mais non utilisé car on passe since_ms/until_ms
+                since_ms=since_ms,  # Utiliser les timestamps exacts
+                until_ms=until_ms,  # Utiliser les timestamps exacts
+                selection="best"
+            )
+            
+            # Vérification des résultats
+            if agg is None or agg.empty:
+                print(f"❌ Aucune donnée reçue via le fetcher pour {symbol}")
+                return jsonify({"error": f"Aucune donnée disponible pour {symbol} sur la période {start_date} à {end_date}. Essayez un autre symbole."}), 400
+            
+            if symbol not in fetch_data.get("__FINAL__", {}):
+                available = list(fetch_data.get("__FINAL__", {}).keys())
+                print(f"❌ {symbol} non trouvé. Disponibles: {available}")
+                return jsonify({"error": f"Symbole {symbol} non trouvé. Disponibles: {available}"}), 400
+            
+            # Récupération du DataFrame final
+            df = fetch_data["__FINAL__"][symbol].copy()
+            
+            if df.empty:
+                print(f"❌ DataFrame vide pour {symbol}")
+                return jsonify({"error": f"Aucune donnée récupérée pour {symbol}"}), 400
+            
+            print(f"✅ {len(df)} bougies téléchargées via {fetch_data['__FINAL_META__'][symbol]['provenance']}")
+            
+            # Définir l'index datetime AVANT tout le reste
+            # Le fetcher retourne une colonne 'date' déjà convertie en datetime
+            if 'date' in df.columns:
+                df = df.set_index('date')
+            elif 'timestamp' in df.columns:
+                df.index = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+                df = df.drop('timestamp', axis=1, errors='ignore')
+            
+            # S'assurer que l'index est un DatetimeIndex
+            if not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+            
+            # Supprimer la colonne timestamp si elle existe encore
+            if 'timestamp' in df.columns:
+                df = df.drop('timestamp', axis=1)
+            
+            # Renommer les colonnes du fetcher (minuscules) vers format backtester (majuscules)
+            df = df.rename(columns={
+                'open': 'Open',
+                'high': 'High',
+                'low': 'Low',
+                'close': 'Close',
+                'volume': 'Volume'
+            })
+            
+            # Vérifier les colonnes requises
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            missing = [col for col in required_cols if col not in df.columns]
+            if missing:
+                print(f"❌ Colonnes manquantes: {missing}")
+                return jsonify({"error": f"Colonnes manquantes dans les données: {missing}"}), 400
+            
+            # Garder seulement les colonnes nécessaires et nettoyer
+            df = df[required_cols]
+            df = df.dropna()
+            
+            # Filtrer les données pour correspondre exactement à la période demandée
+            # Convertir start_date et end_date en datetime avec timezone
+            filter_start = pd.to_datetime(start_date).tz_localize('UTC')
+            filter_end = pd.to_datetime(end_date).tz_localize('UTC')
+            
+            # S'assurer que l'index a une timezone
+            if df.index.tz is None:
+                df.index = df.index.tz_localize('UTC')
+            
+            # Filtrer
+            df = df[(df.index >= filter_start) & (df.index <= filter_end)]
+            
+            if df.empty:
+                print(f"❌ Aucune donnée après filtrage de la période {start_date} à {end_date}")
+                return jsonify({"error": f"Aucune donnée dans la période demandée {start_date} à {end_date}"}), 400
+            
+            # Affichage sécurisé des dates
+            start_str = df.index[0].strftime('%Y-%m-%d %H:%M') if hasattr(df.index[0], 'strftime') else str(df.index[0])
+            end_str = df.index[-1].strftime('%Y-%m-%d %H:%M') if hasattr(df.index[-1], 'strftime') else str(df.index[-1])
+            print(f"✅ Données standardisées: {len(df)} bougies de {start_str} à {end_str}")
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de la récupération des données: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": f"Erreur fetcher: {str(e)}"}), 500
+        
+        # Configuration des paramètres SmartBot V2
+        params = ParametresDCA_SmartBotV2(
+            # DSC Configuration
+            dsc=data.get('dsc', 'RSI + MFI'),
+            dsc2_enabled=data.get('dsc2_enabled', False),
+            dsc2=data.get('dsc2', 'Bollinger Band %'),
+            
+            # Order Settings
+            base_order=float(data.get('base_order', 1000.0)),
+            safe_order=float(data.get('safe_order', 1500.0)),
+            max_safe_order=int(data.get('max_so', 20)),
+            safe_order_volume_scale=float(data.get('so_volume_scale', 1.5)),
+            
+            # Price Deviation Settings
+            pricedevbase=data.get('pricedevbase', 'ATR'),
+            price_deviation=float(data.get('price_deviation', 4.0)),
+            deviation_scale=float(data.get('deviation_scale', 1.0)),
+            
+            # ATR Settings
+            atr_length=int(data.get('atr_length', 14)),
+            atr_mult=float(data.get('atr_mult', 3.0)),
+            atr_mult_step_scale=float(data.get('atr_step_scale', 1.2)),
+            
+            # Take Profit Settings
+            take_profit=float(data.get('take_profit', 1.5)),
+            tp_type=data.get('tp_type', 'From Average Entry'),
+            
+            # Indicator Settings: RSI
+            rsi_length=int(data.get('rsi_length', 2)),
+            dsc_rsi_threshold_low=int(data.get('rsi_threshold', 3)),
+            
+            # Indicator Settings: MFI
+            mfi_length=int(data.get('mfi_length', 14)),
+            mfi_threshold_low=int(data.get('mfi_threshold', 30)),
+            
+            # Indicator Settings: Bollinger Bands
+            bb_length=int(data.get('bb_length', 20)),
+            bb_mult=float(data.get('bb_mult', 2.0)),
+            bb_threshold_low=float(data.get('bb_threshold_low', 0.0)),
+            
+            # System Settings
+            initial_capital=float(data.get('initial_capital', 100000.0)),
+            commission=float(data.get('commission', 0.001)),
+            slippage_pourcent=float(data.get('slippage', 0.0))
+        )
+        
+        # Exécution du backtest
+        print(f"🚀 Lancement du backtest SmartBot V2...")
+        trades, equity, statistics = backtest_smartbot_v2(df, params)
+        
+        # Préparer les données pour les graphiques côté client
+        equity_data = {
+            'x': equity.index.strftime('%Y-%m-%d %H:%M').tolist(),
+            'y': equity.values.tolist()
+        }
+        
+        price_data = {
+            'x': df.index.strftime('%Y-%m-%d %H:%M').tolist(),
+            'y': df['Close'].tolist()
+        }
+        
+        # Préparer les trades pour le graphique
+        trades_data = []
+        if not trades.empty:
+            for idx, trade in trades.iterrows():
+                trades_data.append({
+                    'entry_time': trade['entry_time'].strftime('%Y-%m-%d %H:%M'),
+                    'exit_time': trade['exit_time'].strftime('%Y-%m-%d %H:%M'),
+                    'entry_price': float(trade['entry_price']),
+                    'exit_price': float(trade['exit_price']),
+                    'avg_entry_price': float(trade['avg_entry_price']),
+                    'so_count': int(trade['so_count']),
+                    'pnl': float(trade['pnl'])
+                })
+        
+        # Préparer la réponse
+        response = {
+            "success": True,
+            "symbol": f"{symbol}-{quote}",
+            "period": f"{start_date} to {end_date}",
+            "trades": trades.to_dict('records') if not trades.empty else [],
+            "statistics": statistics,
+            "equity_data": equity_data,
+            "price_data": price_data,
+            "trades_data": trades_data
+        }
+        
+        print(f"✅ Backtest terminé: {statistics.get('total_trades', 0)} trades")
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"❌ Erreur backtest SmartBot V2: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 # -----------------------------------------------------------------------------

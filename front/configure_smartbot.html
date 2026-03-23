@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <!-- VERSION: 2026-03-23-CENTERED-NO-LEGEND -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Kronos - SmartBot V2 Configuration</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background: #ffffff;
+            color: #000000;
+            min-height: 100vh;
+            padding: 0;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+            background: #ffffff;
+            padding: 0;
+        }
+        
+        header {
+            background: #000000;
+            color: #ffffff;
+            padding: 20px 40px;
+            border-bottom: 1px solid #000000;
+        }
+        
+        h1 {
+            color: #ffffff;
+            margin-bottom: 8px;
+            font-size: 2.2em;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+        
+        .subtitle {
+            color: #cccccc;
+            margin-bottom: 15px;
+            font-size: 0.95em;
+            font-weight: 400;
+            letter-spacing: 0.3px;
+        }
+        
+        .nav-links {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #333333;
+        }
+        
+        .nav-links a {
+            color: #ffffff;
+            text-decoration: none;
+            margin-right: 30px;
+            font-size: 0.85em;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+            transition: opacity 0.2s;
+        }
+        
+        .nav-links a:hover {
+            opacity: 0.7;
+        }
+        
+        .sections-container {
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            background: #ffffff;
+        }
+        
+        .sections-headers {
+            display: flex;
+            gap: 0;
+            align-items: flex-start;
+        }
+        
+        .section {
+            background: #000000;
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #333333;
+            align-self: flex-start;
+        }
+        
+        .section:last-child {
+            border-right: none;
+        }
+        
+        .accordion-header {
+            color: #ffffff;
+            font-size: 0.75em;
+            padding: 12px 10px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: background 0.2s;
+            text-align: center;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        
+        .accordion-header.active {
+            background: #1a1a1a;
+        }
+        
+        .accordion-icon {
+            font-size: 0.7em;
+            transition: transform 0.3s;
+            color: #ffffff;
+            margin-top: 3px;
+        }
+        
+        .accordion-header.active .accordion-icon {
+            transform: rotate(180deg);
+        }
+        
+        .accordion-content {
+            display: none;
+            background: #000000;
+            border-top: 1px solid #333333;
+        }
+        
+        .accordion-content.active {
+            display: block;
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .accordion-body {
+            padding: 15px 10px;
+        }
+        
+        .form-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .form-group {
+            margin-bottom: 0;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #ffffff;
+            font-size: 0.75em;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+        
+        .label-help {
+            color: #666666;
+            font-size: 0.75em;
+            display: block;
+            margin-top: 3px;
+            font-weight: 400;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+        
+        input[type="text"],
+        input[type="number"],
+        input[type="date"],
+        select {
+            width: 100%;
+            padding: 8px 10px;
+            background: #ffffff;
+            border: 1px solid #cccccc;
+            border-radius: 0;
+            color: #000000;
+            font-size: 13px;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            transition: all 0.2s;
+        }
+        
+        input:focus,
+        select:focus {
+            outline: none;
+            border-color: #000000;
+            box-shadow: inset 0 0 0 1px #000000;
+        }
+        
+        .btn {
+            padding: 14px 28px;
+            border: none;
+            border-radius: 0;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-block;
+            min-width: 200px;
+        }
+        
+        .button-container {
+            padding: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            background: #ffffff;
+        }
+        
+        .btn-primary {
+            background: #000000;
+            color: #ffffff;
+            border: 2px solid #000000;
+        }
+        
+        .btn-primary:hover {
+            background: #333333;
+            border-color: #333333;
+        }
+        
+        .btn-secondary {
+            background: #ffffff;
+            color: #000000;
+            border: 2px solid #000000;
+        }
+        
+        .btn-secondary:hover {
+            background: #f5f5f5;
+        }
+        
+        .info-box {
+            background: #ffffff;
+            border-left: 4px solid #000000;
+            padding: 20px;
+            margin: 20px 40px;
+            color: #333333;
+            font-size: 0.9em;
+            line-height: 1.7;
+        }
+        
+        .info-box strong {
+            color: #000000;
+            font-weight: 700;
+        }
+        
+        .loading {
+            display: none;
+            color: #000000;
+            text-align: center;
+            padding: 40px;
+            font-size: 1.1em;
+            font-weight: 600;
+        }
+        
+        .loading.active {
+            display: block;
+        }
+        
+        .results {
+            display: none;
+            margin: 0;
+            padding: 0;
+            background: #ffffff;
+            width: 100%;
+        }
+        
+        .results.active {
+            display: block;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1px;
+            background: #333333;
+            border: none;
+            margin: 0 0 20px 0;
+        }
+        
+        .stat-card {
+            background: #000000;
+            padding: 20px;
+            text-align: left;
+            border: none;
+        }
+        
+        .stat-label {
+            color: #999999;
+            font-size: 0.75em;
+            margin-bottom: 8px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+        
+        .stat-value {
+            color: #ffffff;
+            font-size: 1.8em;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+        
+        .stat-value.positive {
+            color: #ffffff;
+        }
+        
+        .stat-value.negative {
+            color: #999999;
+        }
+        
+        .chart-container {
+            background: #ffffff;
+            border: none;
+            padding: 0;
+            margin: 0 auto;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        
+        .chart-container h3 {
+            color: #000000;
+            font-weight: 700;
+            margin-bottom: 20px;
+            letter-spacing: 0.3px;
+            font-size: 0.9em;
+            border-bottom: none;
+            padding-bottom: 10px;
+        }
+        
+        .chart-container img {
+            max-width: 100%;
+            border: none;
+        }
+        
+        .chart-container div {
+            margin-top: 0;
+            padding: 0;
+            background: #ffffff;
+            border-left: none;
+            font-size: 0.85em;
+            line-height: 1.8;
+            color: #333333;
+        }
+        
+        .preset-buttons {
+            display: flex;
+            gap: 1px;
+            background: #e0e0e0;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .preset-btn {
+            flex: 1;
+            padding: 12px 20px;
+            background: #ffffff;
+            border: none;
+            color: #000000;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            transition: all 0.2s;
+        }
+        
+        .preset-btn:hover {
+            background: #f5f5f5;
+            color: #000000;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>SmartBot V2</h1>
+            <p class="subtitle">Advanced DCA Strategy Configuration & Backtesting</p>
+            <div class="nav-links">
+                <a href="index.html">Dashboard</a>
+                <a href="run_multi.html">Multi-Asset</a>
+                <a href="#">Documentation</a>
+            </div>
+        </header>
+
+        <form id="backtestForm">
+            <div class="sections-container">
+                <div class="sections-headers">
+                    <!-- Market Data -->
+                    <div class="section">
+                        <div class="accordion-header active" onclick="toggleAccordion(0)">
+                            <span>Market Data</span>
+                            <span class="accordion-icon">▼</span>
+                        </div>
+                        <div class="accordion-content active" data-section="0">
+                            <div class="accordion-body">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label>Asset
+                                            <span class="label-help">Ex: BTC, ETH, SOL</span>
+                                        </label>
+                                        <input type="text" id="symbol" value="BTC" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Quote
+                                            <span class="label-help">USD, USDT, EUR</span>
+                                        </label>
+                                        <input type="text" id="quote" value="USD" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Exchange</label>
+                                        <select id="exchange">
+                                            <option value="binance">Binance</option>
+                                            <option value="coinbase">Coinbase</option>
+                                            <option value="kraken">Kraken</option>
+                                            <option value="bitstamp">Bitstamp</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Timeframe</label>
+                                        <select id="timeframe">
+                                            <option value="1m">1 minute</option>
+                                            <option value="5m">5 minutes</option>
+                                            <option value="15m">15 minutes</option>
+                                            <option value="1h" selected>1 hour</option>
+                                            <option value="4h">4 hours</option>
+                                            <option value="1d">1 day</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Start Date</label>
+                                        <input type="date" id="start_date" value="2024-01-01" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>End Date</label>
+                                        <input type="date" id="end_date" value="2025-01-01" required>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Entry Conditions -->
+                    <div class="section">
+                        <div class="accordion-header" onclick="toggleAccordion(1)">
+                            <span>Entry Conditions</span>
+                            <span class="accordion-icon">▼</span>
+                        </div>
+                        <div class="accordion-content" data-section="1">
+                            <div class="accordion-body">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label>DSC Primaire</label>
+                                        <select id="dsc">
+                                            <option value="RSI">RSI Seul</option>
+                                            <option value="MFI">MFI Seul</option>
+                                            <option value="Bollinger Band %">Bollinger Band % Seul</option>
+                                            <option value="RSI + MFI" selected>RSI + MFI</option>
+                                            <option value="RSI + BB">RSI + Bollinger Band %</option>
+                                            <option value="BB + MFI">BB % + MFI</option>
+                                            <option value="All Three">Tous les 3</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>RSI Length</label>
+                                        <input type="number" id="rsi_length" value="2" min="1" max="50">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>RSI Threshold (Oversold)</label>
+                                        <input type="number" id="rsi_threshold" value="3" min="1" max="50">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>MFI Length</label>
+                                        <input type="number" id="mfi_length" value="14" min="1" max="50">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>MFI Threshold (Oversold)</label>
+                                        <input type="number" id="mfi_threshold" value="30" min="1" max="50">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>BB Length</label>
+                                        <input type="number" id="bb_length" value="20" min="1" max="100">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Order Management -->
+                    <div class="section">
+                        <div class="accordion-header" onclick="toggleAccordion(2)">
+                            <span>Order Management</span>
+                            <span class="accordion-icon">▼</span>
+                        </div>
+                        <div class="accordion-content" data-section="2">
+                            <div class="accordion-body">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label>Base Order ($)</label>
+                                        <input type="number" id="base_order" value="1000" min="1" step="1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Safety Order ($)</label>
+                                        <input type="number" id="safe_order" value="1500" min="1" step="1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Max Safety Orders</label>
+                                        <input type="number" id="max_so" value="20" min="1" max="50">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>SO Volume Scale
+                                            <span class="label-help">Multiplier per SO</span>
+                                        </label>
+                                        <input type="number" id="so_volume_scale" value="1.5" min="1" max="3" step="0.1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Initial Capital ($)
+                                            <span class="label-help">Starting balance</span>
+                                        </label>
+                                        <input type="number" id="initial_capital" value="100000" min="1000" step="1000">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Price Deviation -->
+                    <div class="section">
+                        <div class="accordion-header" onclick="toggleAccordion(3)">
+                            <span>Price Deviation</span>
+                            <span class="accordion-icon">▼</span>
+                        </div>
+                        <div class="accordion-content" data-section="3">
+                            <div class="accordion-body">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label>Deviation Method</label>
+                                        <select id="pricedevbase">
+                                            <option value="From Base Order">From Base Order</option>
+                                            <option value="From Last Safety Order">From Last Safety Order</option>
+                                            <option value="ATR" selected>ATR (Dynamic)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Price Deviation (%)
+                                            <span class="label-help">Not used if ATR</span>
+                                        </label>
+                                        <input type="number" id="price_deviation" value="4.0" min="0.1" step="0.1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>ATR Length</label>
+                                        <input type="number" id="atr_length" value="14" min="1" max="50">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>ATR Multiplier</label>
+                                        <input type="number" id="atr_mult" value="3.0" min="0.5" step="0.1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>ATR Step Scale
+                                            <span class="label-help">Growth per SO</span>
+                                        </label>
+                                        <input type="number" id="atr_step_scale" value="1.2" min="1"  max="2" step="0.1">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Take Profit -->
+                    <div class="section">
+                        <div class="accordion-header" onclick="toggleAccordion(4)">
+                            <span>Take Profit</span>
+                            <span class="accordion-icon">▼</span>
+                        </div>
+                        <div class="accordion-content" data-section="4">
+                            <div class="accordion-body">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label>Take Profit (%)</label>
+                                        <input type="number" id="take_profit" value="1.5" min="0.1" step="0.1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>TP Type</label>
+                                        <select id="tp_type">
+                                            <option value="From Average Entry" selected>From Average Entry</option>
+                                            <option value="From Base Order">From Base Order</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Commission (%)</label>
+                                        <input type="number" id="commission" value="0.1" min="0" step="0.01">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="button-container">
+                <button type="submit" class="btn btn-primary">Run Backtest</button>
+                <button type="button" class="btn btn-secondary" onclick="resetForm()">Reset</button>
+            </div>
+        </form>
+
+        <div class="loading" id="loading">
+            <p>RUNNING BACKTEST... PLEASE WAIT</p>
+        </div>
+
+        <div class="results" id="results">
+            <div class="stats-grid" id="statsGrid">
+                <!-- Stats will be inserted here -->
+            </div>
+
+            <div class="chart-container" id="chartContainer">
+                <!-- Chart will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleAccordion(index) {
+            const targetHeader = document.querySelectorAll('.accordion-header')[index];
+            const targetContent = document.querySelector(`.accordion-content[data-section="${index}"]`);
+            
+            // Toggle selected accordion only (allow multiple open)
+            targetHeader.classList.toggle('active');
+            targetContent.classList.toggle('active');
+        }
+        
+        function resetForm() {
+            if (confirm('Reset all parameters?')) {
+                document.getElementById('backtestForm').reset();
+            }
+        }
+
+        document.getElementById('backtestForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            
+            loading.classList.add('active');
+            results.classList.remove('active');
+
+            // Collect all parameters
+            const params = {
+                symbol: document.getElementById('symbol').value,
+                quote: document.getElementById('quote').value,
+                exchange: document.getElementById('exchange').value,
+                timeframe: document.getElementById('timeframe').value,
+                start_date: document.getElementById('start_date').value,
+                end_date: document.getElementById('end_date').value,
+                
+                // DSC
+                dsc: document.getElementById('dsc').value,
+                rsi_length: parseInt(document.getElementById('rsi_length').value),
+                rsi_threshold: parseInt(document.getElementById('rsi_threshold').value),
+                mfi_length: parseInt(document.getElementById('mfi_length').value),
+                mfi_threshold: parseInt(document.getElementById('mfi_threshold').value),
+                bb_length: parseInt(document.getElementById('bb_length').value),
+                
+                // Orders
+                base_order: parseFloat(document.getElementById('base_order').value),
+                safe_order: parseFloat(document.getElementById('safe_order').value),
+                max_so: parseInt(document.getElementById('max_so').value),
+                so_volume_scale: parseFloat(document.getElementById('so_volume_scale').value),
+                initial_capital: parseFloat(document.getElementById('initial_capital').value),
+                
+                // Price Deviation
+                pricedevbase: document.getElementById('pricedevbase').value,
+                price_deviation: parseFloat(document.getElementById('price_deviation').value),
+                atr_length: parseInt(document.getElementById('atr_length').value),
+                atr_mult: parseFloat(document.getElementById('atr_mult').value),
+                atr_step_scale: parseFloat(document.getElementById('atr_step_scale').value),
+                
+                // TP
+                take_profit: parseFloat(document.getElementById('take_profit').value),
+                tp_type: document.getElementById('tp_type').value,
+                commission: parseFloat(document.getElementById('commission').value) / 100
+            };
+
+            try {
+                const response = await fetch('http://localhost:5002/backtest-smartbot-v2', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(params)
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    alert('❌ Error: ' + data.error);
+                    loading.classList.remove('active');
+                    return;
+                }
+
+                displayResults(data);
+                loading.classList.remove('active');
+                results.classList.add('active');
+
+            } catch (error) {
+                alert('❌ Connection error: ' + error.message);
+                loading.classList.remove('active');
+            }
+        });
+
+        function displayResults(data) {
+            const statsGrid = document.getElementById('statsGrid');
+            const stats = data.statistics;
+
+            statsGrid.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">Initial Capital</div>
+                    <div class="stat-value">
+                        $${stats.initial_capital?.toFixed(2) || 0}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Final Capital</div>
+                    <div class="stat-value ${stats.final_capital >= stats.initial_capital ? 'positive' : 'negative'}">
+                        $${stats.final_capital?.toFixed(2) || 0}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Return</div>
+                    <div class="stat-value ${stats.capital_return_pct >= 0 ? 'positive' : 'negative'}">
+                        ${stats.capital_return_pct?.toFixed(2) || 0}%
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Trades</div>
+                    <div class="stat-value">${stats.total_trades || 0}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Skipped Trades</div>
+                    <div class="stat-value negative">
+                        ${stats.skipped_trades || 0}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Win Rate</div>
+                    <div class="stat-value ${stats.win_rate >= 50 ? 'positive' : 'negative'}">
+                        ${stats.win_rate?.toFixed(1) || 0}%
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">PnL Total</div>
+                    <div class="stat-value ${stats.total_pnl >= 0 ? 'positive' : 'negative'}">
+                        $${stats.total_pnl?.toFixed(2) || 0}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg PnL / Trade</div>
+                    <div class="stat-value ${stats.avg_pnl_per_trade >= 0 ? 'positive' : 'negative'}">
+                        $${stats.avg_pnl_per_trade?.toFixed(2) || 0}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Max Drawdown</div>
+                    <div class="stat-value negative">
+                        $${Math.abs(stats.max_drawdown || 0).toFixed(2)}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg SO / Trade</div>
+                    <div class="stat-value">
+                        ${stats.avg_so_per_trade?.toFixed(1) || 0}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Max SO Used</div>
+                    <div class="stat-value">
+                        ${stats.max_so_used || 0}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Largest Win</div>
+                    <div class="stat-value positive">
+                        $${stats.largest_win?.toFixed(2) || 0}
+                    </div>
+                </div>
+            `;
+
+            // Display chart if available
+            const chartContainer = document.getElementById('chartContainer');
+            
+            // Debug: afficher ce qui est reçu
+            console.log('Data received:', data);
+            console.log('equity_data:', data.equity_data);
+            console.log('price_data:', data.price_data);
+            
+            if (data.equity_data && data.price_data) {
+                console.log('Creating charts...');
+                // Créer le conteneur pour les graphiques
+                chartContainer.innerHTML = `
+                    <div style="display: flex; gap: 20px; max-width: 1800px; margin: 0 auto; padding: 20px;">
+                        <div id="equity-chart" style="flex: 1; background: #ffffff;"></div>
+                        <div id="price-chart" style="flex: 1; background: #ffffff;"></div>
+                    </div>
+                `;
+                
+                // Créer le graphique d'équité
+                const equityTrace = {
+                    x: data.equity_data.x,
+                    y: data.equity_data.y,
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: 'Equity',
+                    line: {color: '#00ff88', width: 2},
+                    fill: 'tozeroy',
+                    fillcolor: 'rgba(0, 255, 136, 0.2)'
+                };
+                
+                const equityLayout = {
+                    title: {text: 'Equity Curve - SmartBot V2', font: {size: 16, color: '#000000', family: 'Arial Black'}},
+                    xaxis: {title: 'Date', titlefont: {size: 12, color: '#000000'}, tickfont: {color: '#000000'}, gridcolor: '#e0e0e0', showgrid: true},
+                    yaxis: {title: 'Cumulative PnL ($)', titlefont: {size: 12, color: '#000000'}, tickfont: {color: '#000000'}, gridcolor: '#e0e0e0', showgrid: true},
+                    paper_bgcolor: '#ffffff',
+                    plot_bgcolor: '#ffffff',
+                    hovermode: 'x unified',
+                    showlegend: true,
+                    legend: {font: {color: '#000000'}, bgcolor: 'rgba(255, 255, 255, 0.8)'}
+                };
+                
+                Plotly.newPlot('equity-chart', [equityTrace], equityLayout, {responsive: true});
+                
+                // Créer le graphique de prix avec les trades
+                const traces = [];
+                
+                // Trace du prix
+                traces.push({
+                    x: data.price_data.x,
+                    y: data.price_data.y,
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: 'Price',
+                    line: {color: '#00d4ff', width: 1.5},
+                    opacity: 0.9
+                });
+                
+                // Ajouter les markers de trades
+                if (data.trades_data && data.trades_data.length > 0) {
+                    const bo_x = [], bo_y = [];
+                    const tp_win_x = [], tp_win_y = [];
+                    const tp_loss_x = [], tp_loss_y = [];
+                    const avg_x = [], avg_y = [];
+                    const annotations = [];
+                    
+                    data.trades_data.forEach(trade => {
+                        bo_x.push(trade.entry_time);
+                        bo_y.push(trade.entry_price);
+                        
+                        if (trade.pnl > 0) {
+                            tp_win_x.push(trade.exit_time);
+                            tp_win_y.push(trade.exit_price);
+                        } else {
+                            tp_loss_x.push(trade.exit_time);
+                            tp_loss_y.push(trade.exit_price);
+                        }
+                        
+                        if (trade.so_count > 0 && trade.avg_entry_price !== trade.entry_price) {
+                            avg_x.push(trade.entry_time);
+                            avg_y.push(trade.avg_entry_price);
+                            
+                            // Ligne pointillée
+                            traces.push({
+                                x: [trade.entry_time, trade.entry_time],
+                                y: [trade.entry_price, trade.avg_entry_price],
+                                type: 'scatter',
+                                mode: 'lines',
+                                line: {color: '#ffeb3b', width: 2, dash: 'dash'},
+                                showlegend: false,
+                                hoverinfo: 'skip'
+                            });
+                            
+                            // Annotation SO
+                            annotations.push({
+                                x: trade.entry_time,
+                                y: trade.entry_price,
+                                text: `${trade.so_count} SO`,
+                                showarrow: true,
+                                arrowhead: 2,
+                                arrowsize: 1,
+                                arrowwidth: 2,
+                                arrowcolor: '#ff9800',
+                                ax: 20,
+                                ay: -30,
+                                bgcolor: '#ff9800',
+                                bordercolor: '#ff6f00',
+                                borderwidth: 2,
+                                borderpad: 4,
+                                font: {color: '#ffffff', size: 10, family: 'Arial Black'}
+                            });
+                        }
+                        
+                        // Ligne de connexion
+                        traces.push({
+                            x: [trade.entry_time, trade.exit_time],
+                            y: [trade.avg_entry_price, trade.exit_price],
+                            type: 'scatter',
+                            mode: 'lines',
+                            line: {color: '#666666', width: 1, dash: 'dot'},
+                            showlegend: false,
+                            opacity: 0.5,
+                            hoverinfo: 'skip'
+                        });
+                    });
+                    
+                    // Base Orders
+                    if (bo_x.length > 0) {
+                        traces.push({
+                            x: bo_x,
+                            y: bo_y,
+                            type: 'scatter',
+                            mode: 'markers',
+                            name: 'Base Order (BO)',
+                            marker: {symbol: 'triangle-up', size: 15, color: '#00ff00', line: {color: '#000000', width: 2}}
+                        });
+                    }
+                    
+                    // TP Wins
+                    if (tp_win_x.length > 0) {
+                        traces.push({
+                            x: tp_win_x,
+                            y: tp_win_y,
+                            type: 'scatter',
+                            mode: 'markers',
+                            name: 'Take Profit (Win)',
+                            marker: {symbol: 'triangle-down', size: 15, color: '#00ff00', line: {color: '#000000', width: 2}}
+                        });
+                    }
+                    
+                    // TP Losses
+                    if (tp_loss_x.length > 0) {
+                        traces.push({
+                            x: tp_loss_x,
+                            y: tp_loss_y,
+                            type: 'scatter',
+                            mode: 'markers',
+                            name: 'Take Profit (Loss)',
+                            marker: {symbol: 'triangle-down', size: 15, color: '#ff4444', line: {color: '#000000', width: 2}}
+                        });
+                    }
+                    
+                    // Avg Prices
+                    if (avg_x.length > 0) {
+                        traces.push({
+                            x: avg_x,
+                            y: avg_y,
+                            type: 'scatter',
+                            mode: 'markers',
+                            name: 'Avg Price after SO',
+                            marker: {symbol: 'circle', size: 10, color: '#ffeb3b', line: {color: '#000000', width: 1.5}}
+                        });
+                    }
+                    
+                    var priceLayout = {
+                        title: {text: `${data.symbol} - Price & Trade Entries SmartBot V2`, font: {size: 16, color: '#000000', family: 'Arial Black'}},
+                        xaxis: {title: 'Date', titlefont: {size: 12, color: '#000000'}, tickfont: {color: '#000000'}, gridcolor: '#e0e0e0', showgrid: true, rangeslider: {visible: false}},
+                        yaxis: {title: 'Price ($)', titlefont: {size: 12, color: '#000000'}, tickfont: {color: '#000000'}, gridcolor: '#e0e0e0', showgrid: true},
+                        paper_bgcolor: '#ffffff',
+                        plot_bgcolor: '#ffffff',
+                        hovermode: 'closest',
+                        showlegend: false,
+                        annotations: annotations
+                    };
+                    
+                    Plotly.newPlot('price-chart', traces, priceLayout, {responsive: true});
+                }
+            } else {
+                chartContainer.innerHTML = '<p style="color: #999999; text-align: center; padding: 40px;">NO DATA AVAILABLE</p>';
+            }
+        }
+    </script>
+</body>
+</html>
