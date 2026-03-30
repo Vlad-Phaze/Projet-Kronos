@@ -1,13 +1,9 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <!-- VERSION: 2026-03-23-CENTERED-NO-LEGEND -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
-    <title>Kronos - SmartBot V2 Configuration</title>
+    <title>Kronos - SmartBot V2 Multi-Asset Portfolio</title>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
         * {
@@ -194,7 +190,8 @@
         input[type="text"],
         input[type="number"],
         input[type="date"],
-        select {
+        select,
+        textarea {
             width: 100%;
             padding: 8px 10px;
             background: #ffffff;
@@ -206,8 +203,14 @@
             transition: all 0.2s;
         }
         
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        
         input:focus,
-        select:focus {
+        select:focus,
+        textarea:focus {
             outline: none;
             border-color: #000000;
             box-shadow: inset 0 0 0 1px #000000;
@@ -253,21 +256,6 @@
         
         .btn-secondary:hover {
             background: #f5f5f5;
-        }
-        
-        .info-box {
-            background: #ffffff;
-            border-left: 4px solid #000000;
-            padding: 20px;
-            margin: 20px 40px;
-            color: #333333;
-            font-size: 0.9em;
-            line-height: 1.7;
-        }
-        
-        .info-box strong {
-            color: #000000;
-            font-weight: 700;
         }
         
         .loading {
@@ -337,99 +325,60 @@
         .chart-container {
             background: #ffffff;
             border: none;
-            padding: 0;
+            padding: 20px;
             margin: 0 auto;
             width: 100%;
-            display: flex;
-            justify-content: center;
         }
         
-        .chart-container h3 {
-            color: #000000;
-            font-weight: 700;
-            margin-bottom: 20px;
-            letter-spacing: 0.3px;
-            font-size: 0.9em;
-            border-bottom: none;
-            padding-bottom: 10px;
-        }
-        
-        .chart-container img {
-            max-width: 100%;
-            border: none;
-        }
-        
-        .chart-container div {
-            margin-top: 0;
-            padding: 0;
-            background: #ffffff;
-            border-left: none;
-            font-size: 0.85em;
-            line-height: 1.8;
-            color: #333333;
-        }
-        
-        .preset-buttons {
-            display: flex;
-            gap: 1px;
-            background: #e0e0e0;
-            border: 1px solid #e0e0e0;
-        }
-        
-        .preset-btn {
-            flex: 1;
-            padding: 12px 20px;
-            background: #ffffff;
-            border: none;
-            color: #000000;
-            cursor: pointer;
-            font-size: 0.85em;
-            font-weight: 600;
-            letter-spacing: 0.3px;
-            transition: all 0.2s;
-        }
-        
-        .preset-btn:hover {
+        .info-box {
             background: #f5f5f5;
-            color: #000000;
+            border-left: 4px solid #000000;
+            padding: 15px;
+            margin: 15px 0;
+            font-size: 0.85em;
+            line-height: 1.6;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>SmartBot V2</h1>
-            <p class="subtitle">Advanced DCA Strategy Configuration & Backtesting</p>
+            <h1>SmartBot V2 - Multi-Asset Portfolio</h1>
+            <p class="subtitle">Advanced DCA Strategy for Multiple Assets with Portfolio Management</p>
             <div class="nav-links">
                 <a href="index.html">Dashboard</a>
-                <a href="run_multi_smartbot.html">Multi-Asset</a>
-                <a href="#">Documentation</a>
+                <a href="configure_smartbot.html">Single Asset</a>
+                <a href="run_multi.html">Legacy Multi</a>
             </div>
         </header>
 
         <form id="backtestForm">
             <div class="sections-container">
                 <div class="sections-headers">
-                    <!-- Market Data -->
+                    <!-- Portfolio Settings -->
                     <div class="section">
                         <div class="accordion-header active" onclick="toggleAccordion(0)">
-                            <span>Market Data</span>
+                            <span>Portfolio Settings</span>
                             <span class="accordion-icon">▼</span>
                         </div>
                         <div class="accordion-content active" data-section="0">
                             <div class="accordion-body">
                                 <div class="form-grid">
                                     <div class="form-group">
-                                        <label>Asset
-                                            <span class="label-help">Ex: BTC, ETH, SOL</span>
+                                        <label>Assets (comma-separated)
+                                            <span class="label-help">Ex: BTC,ETH,SOL,ADA</span>
                                         </label>
-                                        <input type="text" id="symbol" value="BTC" required>
+                                        <textarea id="assets" required>BTC,ETH</textarea>
                                     </div>
                                     <div class="form-group">
-                                        <label>Quote
-                                            <span class="label-help">USD, USDT, EUR</span>
-                                        </label>
+                                        <label>Quote Currency</label>
                                         <input type="text" id="quote" value="USD" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Max Active Trades
+                                            <span class="label-help">Max simultaneous positions</span>
+                                        </label>
+                                        <input type="number" id="max_active_trades" value="3" min="1" max="20">
                                     </div>
                                     <div class="form-group">
                                         <label>Exchange</label>
@@ -443,8 +392,6 @@
                                     <div class="form-group">
                                         <label>Timeframe</label>
                                         <select id="timeframe">
-                                            <option value="1m">1 minute</option>
-                                            <option value="5m">5 minutes</option>
                                             <option value="15m">15 minutes</option>
                                             <option value="1h" selected>1 hour</option>
                                             <option value="4h">4 hours</option>
@@ -466,23 +413,23 @@
 
                     <!-- Entry Conditions -->
                     <div class="section">
-                        <div class="accordion-header" onclick="toggleAccordion(1)">
+                        <div class="accordion-header active" onclick="toggleAccordion(1)">
                             <span>Entry Conditions</span>
                             <span class="accordion-icon">▼</span>
                         </div>
-                        <div class="accordion-content" data-section="1">
+                        <div class="accordion-content active" data-section="1">
                             <div class="accordion-body">
                                 <div class="form-grid">
                                     <div class="form-group">
-                                        <label>DSC Primaire</label>
+                                        <label>DSC Primary</label>
                                         <select id="dsc">
-                                            <option value="RSI">RSI Seul</option>
-                                            <option value="MFI">MFI Seul</option>
-                                            <option value="Bollinger Band %">Bollinger Band % Seul</option>
+                                            <option value="RSI">RSI Only</option>
+                                            <option value="MFI">MFI Only</option>
+                                            <option value="Bollinger Band %">Bollinger Band % Only</option>
                                             <option value="RSI + MFI" selected>RSI + MFI</option>
                                             <option value="RSI + BB">RSI + Bollinger Band %</option>
                                             <option value="BB + MFI">BB % + MFI</option>
-                                            <option value="All Three">Tous les 3</option>
+                                            <option value="All Three">All Three</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
@@ -512,11 +459,11 @@
 
                     <!-- Order Management -->
                     <div class="section">
-                        <div class="accordion-header" onclick="toggleAccordion(2)">
+                        <div class="accordion-header active" onclick="toggleAccordion(2)">
                             <span>Order Management</span>
                             <span class="accordion-icon">▼</span>
                         </div>
-                        <div class="accordion-content" data-section="2">
+                        <div class="accordion-content active" data-section="2">
                             <div class="accordion-body">
                                 <div class="form-grid">
                                     <div class="form-group">
@@ -539,7 +486,7 @@
                                     </div>
                                     <div class="form-group">
                                         <label>Initial Capital ($)
-                                            <span class="label-help">Starting balance</span>
+                                            <span class="label-help">Total portfolio balance</span>
                                         </label>
                                         <input type="number" id="initial_capital" value="100000" min="1000" step="1000">
                                     </div>
@@ -550,11 +497,11 @@
 
                     <!-- Price Deviation -->
                     <div class="section">
-                        <div class="accordion-header" onclick="toggleAccordion(3)">
+                        <div class="accordion-header active" onclick="toggleAccordion(3)">
                             <span>Price Deviation</span>
                             <span class="accordion-icon">▼</span>
                         </div>
-                        <div class="accordion-content" data-section="3">
+                        <div class="accordion-content active" data-section="3">
                             <div class="accordion-body">
                                 <div class="form-grid">
                                     <div class="form-group">
@@ -583,7 +530,7 @@
                                         <label>ATR Step Scale
                                             <span class="label-help">Growth per SO</span>
                                         </label>
-                                        <input type="number" id="atr_step_scale" value="1.2" min="1"  max="2" step="0.1">
+                                        <input type="number" id="atr_step_scale" value="1.2" min="1" max="2" step="0.1">
                                     </div>
                                 </div>
                             </div>
@@ -592,11 +539,11 @@
 
                     <!-- Take Profit -->
                     <div class="section">
-                        <div class="accordion-header" onclick="toggleAccordion(4)">
+                        <div class="accordion-header active" onclick="toggleAccordion(4)">
                             <span>Take Profit</span>
                             <span class="accordion-icon">▼</span>
                         </div>
-                        <div class="accordion-content" data-section="4">
+                        <div class="accordion-content active" data-section="4">
                             <div class="accordion-body">
                                 <div class="form-grid">
                                     <div class="form-group">
@@ -614,6 +561,15 @@
                                         <label>Commission (%)</label>
                                         <input type="number" id="commission" value="0.1" min="0" step="0.01">
                                     </div>
+                                    <div class="form-group">
+                                        <label>Close Last Trade
+                                            <span class="label-help">Close open trades at end</span>
+                                        </label>
+                                        <select id="close_last_trade">
+                                            <option value="false" selected>No (Keep Open)</option>
+                                            <option value="true">Yes (Force Close)</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -621,14 +577,20 @@
                 </div>
             </div>
 
+            <div class="info-box">
+                <strong>Portfolio Mode:</strong> This will run SmartBot V2 strategy across multiple assets simultaneously 
+                with a shared capital pool. The "Max Active Trades" parameter limits how many positions can be open at the same time. 
+                Each asset will compete for capital based on entry signals. Trades marked as "open at end" will be shown in statistics.
+            </div>
+
             <div class="button-container">
-                <button type="submit" class="btn btn-primary">Run Backtest</button>
+                <button type="submit" class="btn btn-primary">Run Portfolio Backtest</button>
                 <button type="button" class="btn btn-secondary" onclick="resetForm()">Reset</button>
             </div>
         </form>
 
         <div class="loading" id="loading">
-            <p>RUNNING BACKTEST... PLEASE WAIT</p>
+            <p>RUNNING PORTFOLIO BACKTEST... THIS MAY TAKE A WHILE</p>
         </div>
 
         <div class="results" id="results">
@@ -637,7 +599,7 @@
             </div>
 
             <div class="chart-container" id="chartContainer">
-                <!-- Chart will be inserted here -->
+                <!-- Charts will be inserted here -->
             </div>
         </div>
     </div>
@@ -647,7 +609,6 @@
             const targetHeader = document.querySelectorAll('.accordion-header')[index];
             const targetContent = document.querySelector(`.accordion-content[data-section="${index}"]`);
             
-            // Toggle selected accordion only (allow multiple open)
             targetHeader.classList.toggle('active');
             targetContent.classList.toggle('active');
         }
@@ -668,9 +629,13 @@
             results.classList.remove('active');
 
             // Collect all parameters
+            const assetsStr = document.getElementById('assets').value;
+            const assets = assetsStr.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+            
             const params = {
-                symbol: document.getElementById('symbol').value,
+                assets: assets,
                 quote: document.getElementById('quote').value,
+                max_active_trades: parseInt(document.getElementById('max_active_trades').value),
                 exchange: document.getElementById('exchange').value,
                 timeframe: document.getElementById('timeframe').value,
                 start_date: document.getElementById('start_date').value,
@@ -701,11 +666,12 @@
                 // TP
                 take_profit: parseFloat(document.getElementById('take_profit').value),
                 tp_type: document.getElementById('tp_type').value,
-                commission: parseFloat(document.getElementById('commission').value) / 100
+                commission: parseFloat(document.getElementById('commission').value) / 100,
+                close_last_trade: document.getElementById('close_last_trade').value === 'true'
             };
 
             try {
-                const response = await fetch('http://localhost:5002/backtest-smartbot-v2', {
+                const response = await fetch('http://localhost:5002/backtest-smartbot-v2-multi', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -726,14 +692,15 @@
                 results.classList.add('active');
 
             } catch (error) {
-                alert('❌ Connection error: ' + error.message);
+                alert('❌ Connection error: ' + error.message + '\n\nMake sure the backend server is running on port 5002.');
                 loading.classList.remove('active');
             }
         });
 
         function displayResults(data) {
             const statsGrid = document.getElementById('statsGrid');
-            const stats = data.statistics;
+            const stats = data.combined_stats || {};
+            const perAsset = data.per_asset_stats || {};
 
             statsGrid.innerHTML = `
                 <div class="stat-card">
@@ -749,39 +716,21 @@
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Return</div>
-                    <div class="stat-value ${stats.capital_return_pct >= 0 ? 'positive' : 'negative'}">
-                        ${stats.capital_return_pct?.toFixed(2) || 0}%
+                    <div class="stat-label">Total Return</div>
+                    <div class="stat-value ${stats.total_return_pct >= 0 ? 'positive' : 'negative'}">
+                        ${stats.total_return_pct?.toFixed(2) || 0}%
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Total Trades</div>
+                    <div class="stat-label">Total Deals</div>
                     <div class="stat-value">${stats.total_trades || 0}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Skipped Trades</div>
-                    <div class="stat-value negative">
-                        ${stats.skipped_trades || 0}
+                    <div class="stat-label">Win Rate (Avg)</div>
+                    <div class="stat-value ${stats.avg_win_rate >= 50 ? 'positive' : 'negative'}">
+                        ${stats.avg_win_rate?.toFixed(1) || 0}%
                     </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Win Rate</div>
-                    <div class="stat-value ${stats.win_rate >= 50 ? 'positive' : 'negative'}">
-                        ${stats.win_rate?.toFixed(1) || 0}%
-                    </div>
-                    <div style="font-size: 0.7em; color: #666; margin-top: 5px;" title="Chaque SO compte comme un événement perdant">SO = perte</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">PnL Total</div>
-                    <div class="stat-value ${stats.total_pnl >= 0 ? 'positive' : 'negative'}">
-                        $${stats.total_pnl?.toFixed(2) || 0}
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Avg PnL / Trade</div>
-                    <div class="stat-value ${stats.avg_pnl_per_trade >= 0 ? 'positive' : 'negative'}">
-                        $${stats.avg_pnl_per_trade?.toFixed(2) || 0}
-                    </div>
+                    <div style="font-size: 0.7em; color: #666; margin-top: 5px;">SO = perte</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Max Drawdown</div>
@@ -790,62 +739,99 @@
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Avg SO / Trade</div>
+                    <div class="stat-label">Total SO Placed</div>
                     <div class="stat-value">
-                        ${stats.avg_so_per_trade?.toFixed(1) || 0}
+                        ${stats.total_so_placed || 0}
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Max SO Used</div>
+                    <div class="stat-label">Assets Traded</div>
                     <div class="stat-value">
-                        ${stats.max_so_used || 0}
+                        ${Object.keys(perAsset).length}
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Largest Win</div>
-                    <div class="stat-value positive">
-                        $${stats.largest_win?.toFixed(2) || 0}
+                    <div class="stat-label">Open Trades at End</div>
+                    <div class="stat-value ${stats.open_trades_at_end > 0 ? 'negative' : ''}">
+                        ${stats.open_trades_at_end || 0}
                     </div>
                 </div>
             `;
 
-            // Display charts
-            const chartContainer = document.getElementById('chartContainer');
+            // Display per-asset breakdown
+            let perAssetHTML = '<div style="padding: 20px;"><h3 style="margin-bottom: 20px; font-size: 1.2em;">Per-Asset Performance</h3>';
+            perAssetHTML += '<div style="display: grid; gap: 15px;">';
             
-            if (data.equity_data && data.price_chart) {
-                // Créer le conteneur pour les graphiques
-                chartContainer.innerHTML = `
-                    <div style="display: flex; gap: 20px; max-width: 1800px; margin: 0 auto; padding: 20px;">
-                        <div id="equity-chart" style="flex: 1; background: #ffffff;"></div>
-                        <div id="price-chart" style="flex: 1; background: #ffffff;"></div>
+            Object.entries(perAsset).forEach(([asset, astats]) => {
+                const chartId = `price-chart-${asset}`;
+                perAssetHTML += `
+                    <div style="background: #f5f5f5; border-left: 4px solid ${astats.total_pnl >= 0 ? '#000000' : '#999999'}">
+                        <div style="padding: 15px; cursor: pointer; user-select: none;" onclick="toggleChart('${chartId}', 'arrow-${asset}')">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div style="font-weight: 700; font-size: 1.1em;">${asset}</div>
+                                <span id="arrow-${asset}" style="font-size: 1.2em; transition: transform 0.3s;">▼</span>
+                            </div>
+                            <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.9em; margin-top: 10px;">
+                                <div><strong>Deals:</strong> ${astats.total_trades || 0}</div>
+                                <div title="Chaque SO compte comme un événement perdant"><strong>Win Rate:</strong> ${astats.win_rate?.toFixed(1) || 0}%</div>
+                                <div><strong>PnL:</strong> $${astats.total_pnl?.toFixed(2) || 0}</div>
+                                <div><strong>SO Placed:</strong> ${astats.total_so_placed || 0}</div>
+                                <div><strong>Avg SO/Deal:</strong> ${astats.avg_so_per_trade?.toFixed(1) || 0}</div>
+                                ${astats.open_trades_at_end > 0 ? `<div style="color: #999;"><strong>Open at End:</strong> ${astats.open_trades_at_end}</div>` : ''}
+                            </div>
+                        </div>
+                        <div id="${chartId}" style="display: none; padding: 15px; background: white; border-top: 1px solid #ddd;"></div>
                     </div>
                 `;
+            });
+            
+            perAssetHTML += '</div></div>';
+
+            // Display charts
+            const chartContainer = document.getElementById('chartContainer');
+            chartContainer.innerHTML = perAssetHTML;
+
+            // Portfolio equity curve
+            if (data.combined_equity && data.combined_equity.length > 0) {
+                chartContainer.innerHTML += '<div id="equity-chart" style="margin: 20px;"></div>';
                 
-                // Créer le graphique d'équité avec Y-axis optimisée
-                const equityValues = data.equity_data.y;
-                const initialCapital = stats.initial_capital || equityValues[0];
-                const minEquity = Math.min(...equityValues);
-                const maxEquity = Math.max(...equityValues);
+                const dates = data.combined_equity.map(e => e.date);
+                const equity = data.combined_equity.map(e => e.equity);
                 
-                // Calculer le range Y-axis optimal
-                const totalRange = maxEquity - minEquity;
-                const margin = totalRange > 0 ? totalRange * 0.1 : initialCapital * 0.05;
-                const yRange = [minEquity - margin, maxEquity + margin];
+                // Calculate Y-axis range for better visualization
+                const initialCapital = stats.initial_capital || equity[0];
+                const minEquity = Math.min(...equity);
+                const maxEquity = Math.max(...equity);
                 
-                const equityTrace = {
-                    x: data.equity_data.x,
-                    y: equityValues,
+                let yRange;
+                if (minEquity >= initialCapital * 0.999) {
+                    // Curve only goes up - start from initial capital
+                    const margin = (maxEquity - initialCapital) * 0.05;
+                    yRange = [initialCapital - margin, maxEquity + margin];
+                } else {
+                    // Has drawdowns - center around initial capital
+                    const maxDeviation = Math.max(
+                        Math.abs(maxEquity - initialCapital),
+                        Math.abs(minEquity - initialCapital)
+                    );
+                    const margin = maxDeviation * 0.1;
+                    yRange = [initialCapital - maxDeviation - margin, initialCapital + maxDeviation + margin];
+                }
+                
+                const trace = {
+                    x: dates,
+                    y: equity,
                     type: 'scatter',
                     mode: 'lines',
-                    name: 'Equity',
+                    name: 'Portfolio Equity',
                     line: {color: '#000000', width: 2},
                     fill: 'tozeroy',
                     fillcolor: 'rgba(0, 0, 0, 0.1)'
                 };
                 
-                const equityLayout = {
+                const layout = {
                     title: {
-                        text: 'Equity Curve - SmartBot V2',
+                        text: 'Portfolio Equity Curve',
                         font: {size: 18, color: '#000000', family: 'Arial Black'}
                     },
                     xaxis: {
@@ -864,8 +850,8 @@
                     hovermode: 'x unified',
                     shapes: [{
                         type: 'line',
-                        x0: data.equity_data.x[0],
-                        x1: data.equity_data.x[data.equity_data.x.length - 1],
+                        x0: dates[0],
+                        x1: dates[dates.length - 1],
                         y0: initialCapital,
                         y1: initialCapital,
                         line: {
@@ -876,12 +862,32 @@
                     }]
                 };
                 
-                Plotly.newPlot('equity-chart', [equityTrace], equityLayout, {responsive: true});
-                
-                // Afficher le graphique de prix (déjà au format Plotly)
-                Plotly.newPlot('price-chart', data.price_chart.data, data.price_chart.layout, {responsive: true});
+                Plotly.newPlot('equity-chart', [trace], layout, {responsive: true});
+            }
+
+            // Individual asset price charts - render into collapsed sections
+            if (data.per_asset_charts) {
+                Object.entries(data.per_asset_charts).forEach(([asset, chartData]) => {
+                    const chartId = `price-chart-${asset}`;
+                    const chartDiv = document.getElementById(chartId);
+                    if (chartDiv) {
+                        // Render the chart using Plotly (chartData is already in Plotly format)
+                        Plotly.newPlot(chartId, chartData.data, chartData.layout, {responsive: true});
+                    }
+                });
+            }
+        }
+
+        function toggleChart(chartId, arrowId) {
+            const chartDiv = document.getElementById(chartId);
+            const arrow = document.getElementById(arrowId);
+            
+            if (chartDiv.style.display === 'none') {
+                chartDiv.style.display = 'block';
+                arrow.style.transform = 'rotate(180deg)';
             } else {
-                chartContainer.innerHTML = '<p style="color: #999999; text-align: center; padding: 40px;">NO DATA AVAILABLE</p>';
+                chartDiv.style.display = 'none';
+                arrow.style.transform = 'rotate(0deg)';
             }
         }
     </script>

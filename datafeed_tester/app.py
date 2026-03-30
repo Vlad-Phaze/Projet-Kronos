@@ -984,6 +984,9 @@ def create_professional_price_chart(df_price, trades_df, title: str = "Analyse d
     if not trades_df.empty:
         buy_dates = []
         buy_prices = []
+        so_dates = []
+        so_prices = []
+        so_numbers = []
         sell_dates = []
         sell_prices = []
         
@@ -995,7 +998,7 @@ def create_professional_price_chart(df_price, trades_df, title: str = "Analyse d
             arrow_offset = 0
         
         for _, trade in trades_df.iterrows():
-            # Gestion des achats (entrées)
+            # Gestion des achats (entrées - BO)
             if 'entry_time' in trade and 'entry_price' in trade and pd.notna(trade['entry_time']):
                 entry_date = pd.to_datetime(trade['entry_time'])
                 entry_price = float(trade['entry_price'])
@@ -1009,13 +1012,39 @@ def create_professional_price_chart(df_price, trades_df, title: str = "Analyse d
                                          lw=3, alpha=0.8, shrinkA=5, shrinkB=5))
                 
                 # Texte BUY simple
-                ax1.text(entry_date, entry_price + arrow_offset * 1.5, 'BUY', 
+                ax1.text(entry_date, entry_price + arrow_offset * 1.5, 'BO', 
                         ha='center', va='bottom', color=colors['buy'], 
                         fontweight='bold', fontsize=10,
                         bbox=dict(boxstyle='round,pad=0.3', facecolor=colors['buy'], 
                                 alpha=0.2, edgecolor=colors['buy']))
             
-            # Gestion des ventes (sorties)
+            # Gestion des Safety Orders (SO)
+            if 'so_times' in trade and 'so_prices' in trade:
+                so_times_list = trade['so_times']
+                so_prices_list = trade['so_prices']
+                
+                if isinstance(so_times_list, (list, tuple)) and isinstance(so_prices_list, (list, tuple)):
+                    for idx, (so_time, so_price) in enumerate(zip(so_times_list, so_prices_list), 1):
+                        so_date = pd.to_datetime(so_time)
+                        so_price_val = float(so_price)
+                        so_dates.append(so_date)
+                        so_prices.append(so_price_val)
+                        so_numbers.append(idx)
+                        
+                        # Flèche SO avec couleur distincte (orange/jaune)
+                        ax1.annotate('', xy=(so_date, so_price_val), 
+                                   xytext=(so_date, so_price_val + arrow_offset),
+                                   arrowprops=dict(arrowstyle='->', color='#FFA500', 
+                                                 lw=2.5, alpha=0.8, shrinkA=5, shrinkB=5))
+                        
+                        # Texte SO avec numéro
+                        ax1.text(so_date, so_price_val + arrow_offset * 1.5, f'SO{idx}', 
+                                ha='center', va='bottom', color='#FFA500', 
+                                fontweight='bold', fontsize=9,
+                                bbox=dict(boxstyle='round,pad=0.3', facecolor='#FFA500', 
+                                        alpha=0.2, edgecolor='#FFA500'))
+            
+            # Gestion des ventes (sorties - TP)
             if 'exit_time' in trade and 'exit_price' in trade and pd.notna(trade['exit_time']):
                 exit_date = pd.to_datetime(trade['exit_time'])
                 exit_price = float(trade['exit_price'])
@@ -1030,7 +1059,7 @@ def create_professional_price_chart(df_price, trades_df, title: str = "Analyse d
                 
                 # Calcul du PnL
                 pnl = exit_price - entry_price if 'entry_price' in trade else 0
-                pnl_text = f"SELL\n{pnl:+.1%}" if pnl != 0 else "SELL"
+                pnl_text = f"TP\n{pnl:+.1%}" if pnl != 0 else "TP"
                 
                 # Texte SELL avec PnL
                 ax1.text(exit_date, exit_price + arrow_offset * 1.5, pnl_text, 
@@ -1049,17 +1078,23 @@ def create_professional_price_chart(df_price, trades_df, title: str = "Analyse d
         if buy_dates:
             ax1.scatter(buy_dates, buy_prices, color=colors['buy'], s=100, 
                        marker='^', alpha=0.8, zorder=5, edgecolor='white', linewidth=1,
-                       label=f'Achats ({len(buy_dates)})')
+                       label=f'BO ({len(buy_dates)})')
+        
+        if so_dates:
+            ax1.scatter(so_dates, so_prices, color='#FFA500', s=80, 
+                       marker='>', alpha=0.8, zorder=5, edgecolor='white', linewidth=1,
+                       label=f'SO ({len(so_dates)})')
         
         if sell_dates:
             ax1.scatter(sell_dates, sell_prices, color=colors['sell'], s=100,
                        marker='v', alpha=0.8, zorder=5, edgecolor='white', linewidth=1,
-                       label=f'Ventes ({len(sell_dates)})')
+                       label=f'TP ({len(sell_dates)})')
         
         # Statistiques des trades
         total_trades = len(trades_df)
+        total_so = len(so_dates)
         if total_trades > 0:
-            ax1.text(0.02, 0.98, f'Trades: {total_trades}', 
+            ax1.text(0.02, 0.98, f'Deals: {total_trades} | SO: {total_so}', 
                     transform=ax1.transAxes, fontsize=12, verticalalignment='top',
                     bbox=dict(boxstyle='round,pad=0.5', facecolor=colors['bg'], alpha=0.8),
                     color=colors['text'], fontweight='bold')
@@ -3515,30 +3550,18 @@ def backtest_smartbot_v2_endpoint():
         print(f"🚀 Lancement du backtest SmartBot V2...")
         trades, equity, statistics = backtest_smartbot_v2(df, params)
         
-        # Préparer les données pour les graphiques côté client
+        # Préparer les données pour l'equity curve
         equity_data = {
             'x': equity.index.strftime('%Y-%m-%d %H:%M').tolist(),
             'y': equity.values.tolist()
         }
         
-        price_data = {
-            'x': df.index.strftime('%Y-%m-%d %H:%M').tolist(),
-            'y': df['Close'].tolist()
-        }
-        
-        # Préparer les trades pour le graphique
-        trades_data = []
-        if not trades.empty:
-            for idx, trade in trades.iterrows():
-                trades_data.append({
-                    'entry_time': trade['entry_time'].strftime('%Y-%m-%d %H:%M'),
-                    'exit_time': trade['exit_time'].strftime('%Y-%m-%d %H:%M'),
-                    'entry_price': float(trade['entry_price']),
-                    'exit_price': float(trade['exit_price']),
-                    'avg_entry_price': float(trade['avg_entry_price']),
-                    'so_count': int(trade['so_count']),
-                    'pnl': float(trade['pnl'])
-                })
+        # Générer le graphique de prix avec marqueurs (style multi-asset)
+        price_chart = create_plotly_price_chart(
+            df,
+            trades,
+            f"{symbol} - SmartBot V2"
+        )
         
         # Préparer la réponse
         response = {
@@ -3548,8 +3571,7 @@ def backtest_smartbot_v2_endpoint():
             "trades": trades.to_dict('records') if not trades.empty else [],
             "statistics": statistics,
             "equity_data": equity_data,
-            "price_data": price_data,
-            "trades_data": trades_data
+            "price_chart": price_chart
         }
         
         print(f"✅ Backtest terminé: {statistics.get('total_trades', 0)} trades")
@@ -3558,6 +3580,338 @@ def backtest_smartbot_v2_endpoint():
         
     except Exception as e:
         print(f"❌ Erreur backtest SmartBot V2: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+def create_plotly_price_chart(df_price, trades_df, title: str = "Price Chart"):
+    """Crée un graphique Plotly avec marqueurs de trades pour le multi-asset"""
+    traces = []
+    
+    if not df_price.empty:
+        # Candlestick chart
+        candlestick = {
+            'type': 'candlestick',
+            'x': df_price.index.strftime('%Y-%m-%d').tolist(),
+            'open': df_price['Open'].tolist(),
+            'high': df_price['High'].tolist(),
+            'low': df_price['Low'].tolist(),
+            'close': df_price['Close'].tolist(),
+            'name': 'Price',
+            'increasing': {'line': {'color': '#000000'}},
+            'decreasing': {'line': {'color': '#999999'}}
+        }
+        traces.append(candlestick)
+    
+    if not trades_df.empty:
+        # Marqueurs BO (Base Order)
+        bo_dates = []
+        bo_prices = []
+        for _, trade in trades_df.iterrows():
+            if 'entry_time' in trade and 'entry_price' in trade and pd.notna(trade['entry_time']):
+                bo_dates.append(pd.to_datetime(trade['entry_time']).strftime('%Y-%m-%d'))
+                bo_prices.append(float(trade['entry_price']))
+        
+        if bo_dates:
+            traces.append({
+                'type': 'scatter',
+                'mode': 'markers+text',
+                'x': bo_dates,
+                'y': bo_prices,
+                'name': 'Base Order',
+                'text': ['BO'] * len(bo_dates),
+                'textposition': 'top center',
+                'marker': {'color': '#000000', 'size': 12, 'symbol': 'triangle-up'},
+                'showlegend': True
+            })
+        
+        # Marqueurs SO (Safety Orders)
+        so_dates = []
+        so_prices = []
+        so_labels = []
+        for _, trade in trades_df.iterrows():
+            if 'so_times' in trade and 'so_prices' in trade:
+                so_times_list = trade['so_times']
+                so_prices_list = trade['so_prices']
+                
+                if isinstance(so_times_list, (list, tuple)) and isinstance(so_prices_list, (list, tuple)):
+                    for idx, (so_time, so_price) in enumerate(zip(so_times_list, so_prices_list), 1):
+                        so_dates.append(pd.to_datetime(so_time).strftime('%Y-%m-%d'))
+                        so_prices.append(float(so_price))
+                        so_labels.append(f'SO{idx}')
+        
+        if so_dates:
+            traces.append({
+                'type': 'scatter',
+                'mode': 'markers+text',
+                'x': so_dates,
+                'y': so_prices,
+                'name': 'Safety Orders',
+                'text': so_labels,
+                'textposition': 'top center',
+                'marker': {'color': '#FFA500', 'size': 10, 'symbol': 'triangle-right'},
+                'showlegend': True
+            })
+        
+        # Marqueurs TP (Take Profit)
+        tp_dates = []
+        tp_prices = []
+        for _, trade in trades_df.iterrows():
+            if 'exit_time' in trade and 'exit_price' in trade and pd.notna(trade['exit_time']):
+                tp_dates.append(pd.to_datetime(trade['exit_time']).strftime('%Y-%m-%d'))
+                tp_prices.append(float(trade['exit_price']))
+        
+        if tp_dates:
+            traces.append({
+                'type': 'scatter',
+                'mode': 'markers+text',
+                'x': tp_dates,
+                'y': tp_prices,
+                'name': 'Take Profit',
+                'text': ['TP'] * len(tp_dates),
+                'textposition': 'bottom center',
+                'marker': {'color': '#000000', 'size': 12, 'symbol': 'triangle-down'},
+                'showlegend': True
+            })
+    
+    layout = {
+        'title': {
+            'text': title,
+            'font': {'size': 18, 'color': '#000000', 'family': 'Arial Black'}
+        },
+        'xaxis': {
+            'title': 'Date',
+            'titlefont': {'size': 12, 'color': '#000000'},
+            'gridcolor': '#e0e0e0'
+        },
+        'yaxis': {
+            'title': 'Price',
+            'titlefont': {'size': 12, 'color': '#000000'},
+            'gridcolor': '#e0e0e0'
+        },
+        'paper_bgcolor': '#ffffff',
+        'plot_bgcolor': '#ffffff',
+        'hovermode': 'x unified',
+        'showlegend': True,
+        'legend': {'x': 0, 'y': 1}
+    }
+    
+    return {'data': traces, 'layout': layout}
+
+
+@app.route('/backtest-smartbot-v2-multi', methods=['POST'])
+def backtest_smartbot_v2_multi_endpoint():
+    """
+    Endpoint pour backtester SmartBot V2 Multi-Asset avec gestion de portfolio
+    """
+    try:
+        data = request.json
+        
+        # Récupération des paramètres
+        assets = data.get('assets', ['BTC', 'ETH'])
+        if isinstance(assets, str):
+            assets = [a.strip() for a in assets.split(',')]
+        
+        quote = data.get('quote', 'USD')
+        exchange_name = data.get('exchange', 'binance')
+        timeframe = data.get('timeframe', '1d')
+        start_date = data.get('start_date', '2024-01-01')
+        end_date = data.get('end_date', '2025-01-01')
+        max_active_trades = int(data.get('max_active_trades', 3))
+        
+        print(f"📊 Backtest SmartBot V2 Multi-Asset: {assets} sur {exchange_name}")
+        print(f"📅 Période: {start_date} → {end_date}")
+        print(f"🎯 Max Active Trades: {max_active_trades}")
+        
+        # Configuration des paramètres SmartBot V2
+        params = ParametresDCA_SmartBotV2(
+            dsc=data.get('dsc', 'RSI + MFI'),
+            base_order=float(data.get('base_order', 1000.0)),
+            safe_order=float(data.get('safe_order', 1500.0)),
+            max_safe_order=int(data.get('max_so', 20)),
+            safe_order_volume_scale=float(data.get('so_volume_scale', 1.5)),
+            pricedevbase=data.get('pricedevbase', 'ATR'),
+            price_deviation=float(data.get('price_deviation', 4.0)),
+            atr_length=int(data.get('atr_length', 14)),
+            atr_mult=float(data.get('atr_mult', 3.0)),
+            atr_mult_step_scale=float(data.get('atr_step_scale', 1.2)),
+            take_profit=float(data.get('take_profit', 1.5)),
+            tp_type=data.get('tp_type', 'From Average Entry'),
+            rsi_length=int(data.get('rsi_length', 2)),
+            dsc_rsi_threshold_low=int(data.get('rsi_threshold', 3)),
+            mfi_length=int(data.get('mfi_length', 14)),
+            mfi_threshold_low=int(data.get('mfi_threshold', 30)),
+            bb_length=int(data.get('bb_length', 20)),
+            initial_capital=float(data.get('initial_capital', 100000.0)),
+            commission=float(data.get('commission', 0.001)),
+            close_last_trade=bool(data.get('close_last_trade', False))
+        )
+        
+        # Téléchargement des données pour tous les assets
+        from datetime import datetime as dt, timezone
+        start_dt = dt.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        end_dt = dt.strptime(end_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        since_ms = int(start_dt.timestamp() * 1000)
+        until_ms = int(end_dt.timestamp() * 1000)
+        
+        tf_map = {'1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d'}
+        tf = tf_map.get(timeframe, '1d')
+        
+        exchanges_list = ['binance', 'coinbase', 'kraken', 'kucoin', 'okx']
+        if exchange_name.lower() in exchanges_list:
+            exchanges_list = [exchange_name.lower()] + [e for e in exchanges_list if e != exchange_name.lower()]
+        
+        print(f"🔄 Téléchargement des données pour {len(assets)} assets...")
+        agg, detail, fetch_data = compare_exchanges_on_bases(
+            exchanges=exchanges_list,
+            bases=assets,
+            timeframe=tf,
+            lookback_days=365,
+            since_ms=since_ms,
+            until_ms=until_ms,
+            selection="best"
+        )
+        
+        if not fetch_data.get("__FINAL__"):
+            return jsonify({"error": "Aucune donnée récupérée"}), 400
+        
+        # Préparer les DataFrames de tous les assets
+        assets_prepared = {}
+        
+        print(f"\n{'='*80}")
+        print(f"🚀 PRÉPARATION MULTI-ASSET BACKTEST")
+        print(f"{'='*80}\n")
+        
+        for asset in assets:
+            if asset not in fetch_data["__FINAL__"]:
+                print(f"⚠️ {asset} non disponible, ignoré")
+                continue
+            
+            print(f"📈 Préparation {asset}...")
+            
+            df = fetch_data["__FINAL__"][asset].copy()
+            
+            # Standardisation
+            if 'date' in df.columns:
+                df = df.set_index('date')
+            elif 'timestamp' in df.columns:
+                df.index = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+                df = df.drop('timestamp', axis=1, errors='ignore')
+            
+            if not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+            
+            df = df.rename(columns={
+                'open': 'Open', 'high': 'High', 'low': 'Low',
+                'close': 'Close', 'volume': 'Volume'
+            })
+            
+            df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+            
+            # Filtrage dates
+            filter_start = pd.to_datetime(start_date).tz_localize('UTC')
+            filter_end = pd.to_datetime(end_date).tz_localize('UTC')
+            
+            if df.index.tz is None:
+                df.index = df.index.tz_localize('UTC')
+            
+            df = df[(df.index >= filter_start) & (df.index <= filter_end)]
+            
+            if df.empty:
+                print(f"⚠️ {asset}: Aucune donnée après filtrage")
+                continue
+            
+            assets_prepared[asset] = df
+            print(f"✅ {asset}: {len(df)} barres")
+        
+        if not assets_prepared:
+            return jsonify({"error": "Aucun asset disponible après préparation"}), 400
+        
+        # Exécuter le backtest multi-portfolio avec limitation de positions
+        from backtester_exact import backtest_smartbot_v2_multi_portfolio
+        
+        per_asset_trades, per_asset_equity, per_asset_stats, combined_equity, portfolio_stats = backtest_smartbot_v2_multi_portfolio(
+            assets_prepared,
+            params,
+            max_active_trades
+        )
+        
+        # Calculer le capital final à partir de l'equity combinée
+        final_capital = combined_equity.iloc[-1] if not combined_equity.empty else params.initial_capital
+        
+        # Statistiques combinées
+        total_deals = sum(s.get('total_trades', 0) for s in per_asset_stats.values())
+        total_orders = sum(s.get('total_orders_placed', 0) for s in per_asset_stats.values())
+        total_pnl = sum(s.get('total_pnl', 0) for s in per_asset_stats.values())
+        total_so_placed = sum(s.get('total_so_placed', 0) for s in per_asset_stats.values())
+        avg_win_rate = np.mean([s.get('win_rate', 0) for s in per_asset_stats.values()]) if per_asset_stats else 0
+        
+        combined_stats = {
+            "initial_capital": params.initial_capital,
+            "final_capital": float(portfolio_stats['final_capital']),
+            "total_return_pct": float(portfolio_stats['total_return_pct']),
+            "total_trades": total_deals,
+            "total_orders": total_orders,
+            "total_so_placed": total_so_placed,
+            "avg_win_rate": float(avg_win_rate),
+            "total_pnl": total_pnl,
+            "max_drawdown": float(portfolio_stats['max_drawdown']),
+            "max_drawdown_pct": float(portfolio_stats['max_drawdown_pct']),
+            "assets_count": len(per_asset_stats),
+            "open_trades_at_end": portfolio_stats['open_positions'],
+            "max_active_trades": max_active_trades
+        }
+        
+        # Formatter l'equity curve combinée
+        combined_equity_list = [
+            {"date": date.strftime('%Y-%m-%d'), "equity": float(value)}
+            for date, value in combined_equity.items()
+        ]
+        
+        print(f"\n{'='*80}")
+        print(f"📊 RÉSULTATS MULTI-ASSET PORTFOLIO")
+        print(f"{'='*80}")
+        print(f"Capital Initial:   ${combined_stats['initial_capital']:.2f}")
+        print(f"Capital Final:     ${combined_stats['final_capital']:.2f}")
+        print(f"Return:            {combined_stats['total_return_pct']:.2f}%")
+        print(f"Max Drawdown:      ${combined_stats['max_drawdown']:.2f} ({combined_stats['max_drawdown_pct']:.2f}%)")
+        print(f"Total Deals:       {combined_stats['total_trades']}")
+        print(f"Total Orders:      {combined_stats['total_orders']}")
+        print(f"Avg Win Rate:      {combined_stats['avg_win_rate']:.1f}%")
+        print(f"Assets Traded:     {combined_stats['assets_count']}")
+        print(f"Max Active Trades: {max_active_trades}")
+        print(f"{'='*80}\n")
+        
+        # Générer les graphiques pour chaque asset
+        per_asset_charts = {}
+        for asset in assets_prepared.keys():
+            if asset in per_asset_trades and not per_asset_trades[asset].empty:
+                df_asset = assets_prepared[asset]
+                trades_asset = per_asset_trades[asset]
+                
+                # Générer le graphique avec les marqueurs
+                chart_data = create_plotly_price_chart(
+                    df_asset, 
+                    trades_asset, 
+                    f"{asset} - SmartBot V2"
+                )
+                per_asset_charts[asset] = chart_data
+        
+        response = {
+            "success": True,
+            "assets": list(assets_prepared.keys()),
+            "period": f"{start_date} to {end_date}",
+            "combined_stats": combined_stats,
+            "per_asset_stats": per_asset_stats,
+            "combined_equity": combined_equity_list,
+            "per_asset_charts": per_asset_charts
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"❌ Erreur backtest SmartBot V2 Multi: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

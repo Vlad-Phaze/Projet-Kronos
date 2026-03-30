@@ -74,6 +74,7 @@ class ParametresDCA_SmartBotV2:
     initial_capital: float = 100000.0  # Starting capital ($)
     commission: float = 0.001  # 0.1%
     slippage_pourcent: float = 0.0
+    close_last_trade: bool = False  # Si False, garde le dernier trade ouvert à la fin
 
 
 def calculer_indicateurs_smartbot(prix_df: pd.DataFrame, parametres: ParametresDCA_SmartBotV2) -> Dict[str, np.ndarray]:
@@ -265,10 +266,17 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     current_so_count = 0
     entry_bar = -1
     last_close_bar = -1
+    current_trade_so_list = []  # Liste des SO pour le trade en cours
     
     # Capital management
     capital_disponible = parametres.initial_capital
     skipped_trades = 0
+    
+    # Tracking pour calcul du drawdown basé sur capital
+    capital_history = [parametres.initial_capital]  # Historique du capital à chaque événement
+    
+    # Equity curve: capital disponible + valeur des positions ouvertes à chaque barre
+    equity_at_bar = np.full(n, parametres.initial_capital, dtype=float)
     
     transactions = []
     pnl_realise = np.zeros(n)
@@ -300,6 +308,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 last_so_price = price
                 current_so_count = 0
                 entry_bar = t
+                current_trade_so_list = []  # Reset la liste des SO pour ce nouveau trade
                 
                 # Calculate position
                 qty = parametres.base_order / price
@@ -309,6 +318,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 
                 # Déduire du capital
                 capital_disponible -= parametres.base_order
+                capital_history.append(capital_disponible)  # Enregistrer la baisse de capital
                 
                 print(f"📍 [{indice[t].strftime('%Y-%m-%d')}] BASE ORDER @ ${price:.2f} | Qty={qty:.6f} | Capital restant=${capital_disponible:.2f}")
         
@@ -341,6 +351,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     "exit_price": exit_price,
                     "reason": "TP",
                     "so_count": current_so_count,
+                    "so_times": [so['time'] for so in current_trade_so_list],
+                    "so_prices": [so['price'] for so in current_trade_so_list],
                     "total_invested": total_invested,
                     "total_position_size": total_position_size,
                     "pnl": pnl_net,
@@ -351,6 +363,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 
                 # Remettre le capital + PnL
                 capital_disponible += total_invested + pnl_net
+                capital_history.append(capital_disponible)  # Enregistrer le retour de capital
                 
                 print(f"✅ [{indice[t].strftime('%Y-%m-%d')}] TAKE PROFIT @ ${exit_price:.2f} | "
                       f"SOs={current_so_count} | PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital=${capital_disponible:.2f}")
@@ -404,60 +417,115 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     last_so_price = price
                     current_so_count += 1
                     
+                    # Enregistrer le SO dans la liste
+                    current_trade_so_list.append({
+                        'time': indice[t],
+                        'price': price,
+                        'size': so_size,
+                        'number': current_so_count
+                    })
+                    
                     # Déduire du capital
                     capital_disponible -= so_size
+                    capital_history.append(capital_disponible)  # Enregistrer la baisse de capital (SO = drawdown)
                     
                     print(f"🔻 [{indice[t].strftime('%Y-%m-%d')}] SAFETY ORDER #{current_so_count} @ ${price:.2f} | "
                           f"Size=${so_size:.2f} | Avg=${avg_entry_price:.2f} | Capital=${capital_disponible:.2f}")
+        
+        # ═══════════════════════════════════════════════════════════
+        # MISE À JOUR DE L'EQUITY À CETTE BARRE
+        # ═══════════════════════════════════════════════════════════
+        if in_trade:
+            # Equity = capital disponible + valeur des positions ouvertes
+            valeur_position = total_position_size * price
+            equity_at_bar[t] = capital_disponible + valeur_position
+        else:
+            # Pas de position, equity = capital disponible
+            equity_at_bar[t] = capital_disponible
     
     # ═══════════════════════════════════════════════════════════
-    # SI POSITION OUVERTE À LA FIN, LA FERMER
+    # SI POSITION OUVERTE À LA FIN
     # ═══════════════════════════════════════════════════════════
+    open_trades_at_end = 0
     if in_trade:
-        prix_final = close[-1]
-        gross_proceeds = prix_final * total_position_size
-        total_fees = (total_invested + gross_proceeds) * parametres.commission
-        pnl_net = gross_proceeds - total_invested - total_fees
-        profit_pct = ((prix_final / avg_entry_price) - 1) * 100.0
-        
-        transactions.append({
-            "entry_time": indice[entry_bar],
-            "exit_time": indice[-1],
-            "entry_price": base_order_price,
-            "avg_entry_price": avg_entry_price,
-            "exit_price": prix_final,
-            "reason": "END",
-            "so_count": current_so_count,
-            "total_invested": total_invested,
-            "total_position_size": total_position_size,
-            "pnl": pnl_net,
-            "pnl_pct": profit_pct
-        })
-        
-        pnl_realise[-1] = pnl_net
-        
-        # Remettre le capital + PnL
-        capital_disponible += total_invested + pnl_net
-        
-        print(f"⚠️ [{indice[-1].strftime('%Y-%m-%d')}] POSITION FORCÉE @ ${prix_final:.2f} | "
-              f"PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital final=${capital_disponible:.2f}")
+        if parametres.close_last_trade:
+            # Fermer le trade à la fin du test
+            prix_final = close[-1]
+            gross_proceeds = prix_final * total_position_size
+            total_fees = (total_invested + gross_proceeds) * parametres.commission
+            pnl_net = gross_proceeds - total_invested - total_fees
+            profit_pct = ((prix_final / avg_entry_price) - 1) * 100.0
+            
+            transactions.append({
+                "entry_time": indice[entry_bar],
+                "exit_time": indice[-1],
+                "entry_price": base_order_price,
+                "avg_entry_price": avg_entry_price,
+                "exit_price": prix_final,
+                "reason": "END",
+                "so_count": current_so_count,
+                "so_times": [so['time'] for so in current_trade_so_list],
+                "so_prices": [so['price'] for so in current_trade_so_list],
+                "total_invested": total_invested,
+                "total_position_size": total_position_size,
+                "pnl": pnl_net,
+                "pnl_pct": profit_pct
+            })
+            
+            pnl_realise[-1] = pnl_net
+            
+            # Remettre le capital + PnL
+            capital_disponible += total_invested + pnl_net
+            equity_at_bar[-1] = capital_disponible  # Mise à jour de l'equity finale
+            
+            print(f"⚠️ [{indice[-1].strftime('%Y-%m-%d')}] POSITION FORCÉE @ ${prix_final:.2f} | "
+                  f"PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital final=${capital_disponible:.2f}")
+        else:
+            # Garder le trade ouvert
+            open_trades_at_end = 1
+            print(f"📌 [{indice[-1].strftime('%Y-%m-%d')}] TRADE OUVERT À LA FIN | "
+                  f"Entry=${base_order_price:.2f} | Current=${close[-1]:.2f} | "
+                  f"Avg=${avg_entry_price:.2f} | SOs={current_so_count} | "
+                  f"Invested=${total_invested:.2f}")
     
     # ═══════════════════════════════════════════════════════════
     # CALCUL DES STATISTIQUES
     # ═══════════════════════════════════════════════════════════
     df_trades = pd.DataFrame(transactions)
-    courbe_equite = pd.Series(pnl_realise, index=prix.index).cumsum()
+    # Equity curve basée sur la valeur réelle du portefeuille (capital + positions)
+    courbe_equite = pd.Series(equity_at_bar, index=prix.index)
+    
+    # Calcul du drawdown basé sur l'évolution réelle du capital
+    capital_array = np.array(capital_history)
+    peak_capital = np.maximum.accumulate(capital_array)
+    drawdowns = capital_array - peak_capital
+    max_drawdown = float(np.min(drawdowns)) if len(drawdowns) > 0 else 0.0
+    max_drawdown_pct = (max_drawdown / parametres.initial_capital * 100) if parametres.initial_capital > 0 else 0.0
     
     statistiques = {}
     if not df_trades.empty:
         winning_trades = df_trades[df_trades["pnl"] > 0]
         losing_trades = df_trades[df_trades["pnl"] <= 0]
         
+        # Compter le nombre total d'ordres (BO + tous les SO)
+        total_orders = len(df_trades)  # Nombre de deals
+        total_so_placed = int(df_trades["so_count"].sum()) if "so_count" in df_trades.columns else 0
+        total_orders_including_so = total_orders + total_so_placed
+        
+        # Win rate ajusté : chaque SO compte comme un événement perdant
+        # Total événements = tous les BO + tous les SO
+        # Événements gagnants = seulement les trades profitables (TP final profitable)
+        total_events = len(df_trades) + total_so_placed
+        win_rate_adjusted = float(len(winning_trades) / total_events * 100) if total_events > 0 else 0.0
+        
         statistiques = {
             "total_trades": len(df_trades),
+            "total_orders_placed": total_orders_including_so,  # BO + tous les SO
+            "total_so_placed": total_so_placed,
             "winning_trades": len(winning_trades),
             "losing_trades": len(losing_trades),
-            "win_rate": float(len(winning_trades) / len(df_trades) * 100),
+            "total_events": total_events,  # BO + SO (pour calcul win rate)
+            "win_rate": win_rate_adjusted,
             "total_pnl": float(df_trades["pnl"].sum()),
             "avg_pnl_per_trade": float(df_trades["pnl"].mean()),
             "avg_win": float(winning_trades["pnl"].mean()) if len(winning_trades) > 0 else 0.0,
@@ -467,31 +535,42 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             "avg_so_per_trade": float(df_trades["so_count"].mean()),
             "max_so_used": int(df_trades["so_count"].max()) if len(df_trades) > 0 else 0,
             "total_invested_avg": float(df_trades["total_invested"].mean()),
-            "max_drawdown": float((courbe_equite - courbe_equite.cummax()).min()) if len(courbe_equite) > 0 else 0.0,
+            "max_drawdown": max_drawdown,
+            "max_drawdown_pct": max_drawdown_pct,
             "initial_capital": float(parametres.initial_capital),
             "final_capital": float(capital_disponible),
             "capital_return_pct": float((capital_disponible - parametres.initial_capital) / parametres.initial_capital * 100),
-            "skipped_trades": int(skipped_trades)
+            "skipped_trades": int(skipped_trades),
+            "open_trades_at_end": open_trades_at_end
+        }
+    else:
+        statistiques = {
+            "open_trades_at_end": open_trades_at_end
         }
     
     print("="*80)
     print("📈 RÉSULTATS DU BACKTEST")
     print("="*80)
-    if statistiques:
+    if statistiques and "total_trades" in statistiques:
         print(f"Capital initial:    ${statistiques['initial_capital']:.2f}")
         print(f"Capital final:      ${statistiques['final_capital']:.2f}")
         print(f"Return:             {statistiques['capital_return_pct']:.2f}%")
         print(f"-"*80)
-        print(f"Trades totaux:      {statistiques['total_trades']}")
-        print(f"Trades gagnants:    {statistiques['winning_trades']} ({statistiques['win_rate']:.1f}%)")
-        print(f"Trades perdants:    {statistiques['losing_trades']}")
-        print(f"Trades skipped:     {statistiques['skipped_trades']}")
+        print(f"Deals totaux:       {statistiques['total_trades']}")
+        print(f"Ordres totaux:      {statistiques['total_orders_placed']} (BO + SO)")
+        print(f"Événements totaux:  {statistiques['total_events']} (chaque SO = événement perdant)")
+        print(f"Deals gagnants:     {statistiques['winning_trades']} ({statistiques['win_rate']:.1f}%)")
+        print(f"Deals perdants:     {statistiques['losing_trades']} + {statistiques['total_so_placed']} SO")
+        print(f"Deals skipped:      {statistiques['skipped_trades']}")
+        if statistiques.get('open_trades_at_end', 0) > 0:
+            print(f"⚠️ Trades ouverts:  {statistiques['open_trades_at_end']}")
         print(f"-"*80)
         print(f"PnL total:          ${statistiques['total_pnl']:.2f}")
-        print(f"PnL moyen/trade:    ${statistiques['avg_pnl_per_trade']:.2f}")
-        print(f"SO moyen/trade:     {statistiques['avg_so_per_trade']:.1f}")
+        print(f"PnL moyen/deal:     ${statistiques['avg_pnl_per_trade']:.2f}")
+        print(f"SO moyen/deal:      {statistiques['avg_so_per_trade']:.1f}")
+        print(f"SO totaux placés:   {statistiques['total_so_placed']}")
         print(f"Max SO utilisé:     {statistiques['max_so_used']}")
-        print(f"Max Drawdown:       ${statistiques['max_drawdown']:.2f}")
+        print(f"Max Drawdown:       ${statistiques['max_drawdown']:.2f} ({statistiques['max_drawdown_pct']:.2f}%)")
     print("="*80)
     
     return df_trades, courbe_equite, statistiques
@@ -574,3 +653,345 @@ if __name__ == "__main__":
                   f"SOs: {trade['so_count']:2d} | {pnl_color} ${trade['pnl']:8.2f} ({trade['pnl_pct']:5.2f}%)")
     
     print("\n✨ Backtest terminé!")
+
+
+def backtest_smartbot_v2_multi_portfolio(
+    assets_data: Dict[str, pd.DataFrame],
+    parametres: ParametresDCA_SmartBotV2,
+    max_active_trades: int = 3
+) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.Series], Dict[str, Dict], pd.Series, Dict]:
+    """
+    Backtest SmartBot V2 avec gestion de portfolio multi-assets
+    
+    Args:
+        assets_data: Dict {asset_name: DataFrame avec OHLCV}
+        parametres: Paramètres SmartBot V2
+        max_active_trades: Nombre maximum de positions simultanées
+        
+    Returns:
+        (per_asset_trades, per_asset_equity, per_asset_stats, combined_equity, combined_stats)
+    """
+    
+    # Préparer tous les DataFrames avec indicateurs
+    assets_prepared = {}
+    for asset, df in assets_data.items():
+        indicators = calculer_indicateurs_smartbot(df, parametres)
+        assets_prepared[asset] = {
+            'df': df,
+            'indicators': indicators,
+            'indice': df.index.to_numpy(),
+            'prix': df['Close'].to_numpy()
+        }
+    
+    # Créer un index temporel unifié (union de tous les timestamps)
+    all_timestamps = pd.DatetimeIndex([])
+    for asset_data in assets_prepared.values():
+        all_timestamps = all_timestamps.union(asset_data['indice'])
+    all_timestamps = all_timestamps.sort_values()
+    
+    # Variables de gestion du portfolio
+    capital_disponible = float(parametres.initial_capital)
+    capital_history = [float(parametres.initial_capital)]  # Historique du capital pour calcul drawdown
+    positions_ouvertes = {}  # {asset: {entry_time, entry_price, quantity, so_count, so_list, invested}}
+    trades_history = {asset: [] for asset in assets_data.keys()}
+    equity_history = []
+    
+    print(f"\n{'='*80}")
+    print(f"🎯 BACKTEST PORTFOLIO MULTI-ASSET")
+    print(f"📊 Assets: {list(assets_data.keys())}")
+    print(f"🔢 Max Positions Simultanées: {max_active_trades}")
+    print(f"💰 Capital Initial: ${capital_disponible:,.2f}")
+    print(f"{'='*80}\n")
+    
+    # Parcourir chronologiquement toutes les barres
+    for t_idx, timestamp in enumerate(all_timestamps):
+        unrealized_pnl = 0.0
+        
+        # Vérifier les conditions de sortie et SO pour les positions ouvertes
+        for asset in list(positions_ouvertes.keys()):
+            if asset not in assets_prepared:
+                continue
+                
+            asset_data = assets_prepared[asset]
+            df = asset_data['df']
+            
+            # Trouver l'index le plus proche de ce timestamp
+            if timestamp not in df.index:
+                continue
+            
+            idx = df.index.get_loc(timestamp)
+            if idx >= len(df):
+                continue
+                
+            position = positions_ouvertes[asset]
+            current_price = df['Close'].iloc[idx]
+            indicators = asset_data['indicators']
+            
+            # Calculer le prix moyen d'entrée
+            avg_entry = position['entry_price'] if position['so_count'] == 0 else (
+                position['invested'] / position['quantity']
+            )
+            
+            # Vérifier la condition de Take Profit
+            tp_target = avg_entry * (1 + parametres.take_profit / 100)
+            
+            if current_price >= tp_target:
+                # SORTIE : Take Profit
+                exit_value = position['quantity'] * current_price * (1 - parametres.commission)
+                pnl = exit_value - position['invested']
+                pnl_pct = (pnl / position['invested']) * 100
+                
+                capital_disponible += exit_value
+                capital_history.append(capital_disponible)  # Enregistrer le retour de capital
+                
+                # Enregistrer le trade
+                trades_history[asset].append({
+                    'entry_time': position['entry_time'],
+                    'entry_price': position['entry_price'],
+                    'exit_time': timestamp,
+                    'exit_price': current_price,
+                    'quantity': position['quantity'],
+                    'so_count': position['so_count'],
+                    'so_times': position['so_list'].get('times', []),
+                    'so_prices': position['so_list'].get('prices', []),
+                    'invested': position['invested'],
+                    'pnl': pnl,
+                    'pnl_pct': pnl_pct
+                })
+                
+                print(f"✅ [{ timestamp.strftime('%Y-%m-%d')}] TAKE PROFIT {asset} @ ${current_price:.2f} | "
+                      f"SOs={position['so_count']} | PnL=${pnl:.2f} ({pnl_pct:.2f}%)")
+                
+                del positions_ouvertes[asset]
+                continue
+            
+            # Vérifier les conditions de Safety Order
+            if position['so_count'] < parametres.max_safe_order:
+                atr = indicators['atr'][idx] if idx < len(indicators['atr']) else 0
+                
+                # Calculer le seuil de déclenchement du SO
+                if parametres.pricedevbase == "ATR":
+                    atr_mult_current = parametres.atr_mult * (parametres.atr_mult_step_scale ** position['so_count'])
+                    so_trigger = avg_entry - (atr * atr_mult_current)
+                elif parametres.pricedevbase == "From Last Safety Order":
+                    last_price = position['so_list']['prices'][-1] if position['so_list']['prices'] else position['entry_price']
+                    deviation = last_price * (parametres.price_deviation / 100)
+                    so_trigger = last_price - deviation
+                else:  # From Base Order
+                    deviation = position['entry_price'] * (parametres.price_deviation / 100)
+                    scale_factor = parametres.deviation_scale ** position['so_count']
+                    so_trigger = position['entry_price'] - (deviation * scale_factor)
+                
+                if current_price <= so_trigger:
+                    # Déclencher le Safety Order
+                    so_size = parametres.safe_order * (parametres.safe_order_volume_scale ** position['so_count'])
+                    
+                    if capital_disponible >= so_size:
+                        so_quantity = (so_size / current_price) * (1 - parametres.commission)
+                        capital_disponible -= so_size
+                        capital_history.append(capital_disponible)  # SO = baisse de capital (drawdown)
+                        
+                        position['quantity'] += so_quantity
+                        position['invested'] += so_size
+                        position['so_count'] += 1
+                        position['so_list']['times'].append(timestamp)
+                        position['so_list']['prices'].append(current_price)
+                        
+                        new_avg = position['invested'] / position['quantity']
+                        
+                        print(f"🔻 [{timestamp.strftime('%Y-%m-%d')}] SAFETY ORDER #{position['so_count']} {asset} @ ${current_price:.2f} | "
+                              f"Size=${so_size:.2f} | Avg=${new_avg:.2f}")
+            
+            # Calculer le PnL non réalisé
+            current_value = position['quantity'] * current_price
+            unrealized_pnl += (current_value - position['invested'])
+        
+        # Vérifier les conditions d'entrée pour les assets sans position
+        if len(positions_ouvertes) < max_active_trades:
+            entry_signals = []
+            
+            for asset, asset_data in assets_prepared.items():
+                if asset in positions_ouvertes:
+                    continue
+                    
+                df = asset_data['df']
+                if timestamp not in df.index:
+                    continue
+                    
+                idx = df.index.get_loc(timestamp)
+                if idx >= len(df):
+                    continue
+                
+                indicators = asset_data['indicators']
+                
+                # Évaluer les Deal Start Conditions
+                dsc_signal = evaluer_dsc(
+                    parametres.dsc,
+                    indicators['rsi'][idx] if idx < len(indicators['rsi']) else 50,
+                    indicators['mfi'][idx] if idx < len(indicators['mfi']) else 50,
+                    indicators['bb_percent'][idx] if idx < len(indicators['bb_percent']) else 0.5,
+                    parametres
+                )
+                
+                if dsc_signal:
+                    current_price = df['Close'].iloc[idx]
+                    entry_signals.append((asset, current_price))
+            
+            # Prendre les meilleures opportunités d'entrée
+            slots_disponibles = max_active_trades - len(positions_ouvertes)
+            for asset, entry_price in entry_signals[:slots_disponibles]:
+                if capital_disponible >= parametres.base_order:
+                    # ENTRÉE : Base Order
+                    quantity = (parametres.base_order / entry_price) * (1 - parametres.commission)
+                    capital_disponible -= parametres.base_order
+                    capital_history.append(capital_disponible)  # Enregistrer la baisse de capital
+                    
+                    positions_ouvertes[asset] = {
+                        'entry_time': timestamp,
+                        'entry_price': entry_price,
+                        'quantity': quantity,
+                        'so_count': 0,
+                        'so_list': {'times': [], 'prices': []},
+                        'invested': parametres.base_order
+                    }
+                    
+                    print(f"📍 [{timestamp.strftime('%Y-%m-%d')}] BASE ORDER {asset} @ ${entry_price:.2f} | "
+                          f"Qty={quantity:.6f} | Capital restant=${capital_disponible:.2f}")
+        
+        # Enregistrer l'equity à ce timestamp
+        total_equity = capital_disponible
+        for position in positions_ouvertes.values():
+            # Trouver le prix actuel pour cet asset
+            for asset, pos_data in positions_ouvertes.items():
+                if pos_data == position and asset in assets_prepared:
+                    df = assets_prepared[asset]['df']
+                    if timestamp in df.index:
+                        current_price = df.loc[timestamp, 'Close']
+                        total_equity += position['quantity'] * current_price
+        
+        equity_history.append({'timestamp': timestamp, 'equity': total_equity})
+    
+    # Fermer les positions ouvertes à la fin (optionnel)
+    if parametres.close_last_trade:
+        for asset, position in list(positions_ouvertes.items()):
+            df = assets_prepared[asset]['df']
+            final_price = df['Close'].iloc[-1]
+            exit_value = position['quantity'] * final_price * (1 - parametres.commission)
+            pnl = exit_value - position['invested']
+            pnl_pct = (pnl / position['invested']) * 100
+            
+            capital_disponible += exit_value
+            
+            trades_history[asset].append({
+                'entry_time': position['entry_time'],
+                'entry_price': position['entry_price'],
+                'exit_time': df.index[-1],
+                'exit_price': final_price,
+                'quantity': position['quantity'],
+                'so_count': position['so_count'],
+                'so_times': position['so_list']['times'],
+                'so_prices': position['so_list']['prices'],
+                'invested': position['invested'],
+                'pnl': pnl,
+                'pnl_pct': pnl_pct
+            })
+            
+            print(f"🔚 [{df.index[-1].strftime('%Y-%m-%d')}] CLÔTURE FORCÉE {asset} @ ${final_price:.2f} | "
+                  f"PnL=${pnl:.2f} ({pnl_pct:.2f}%)")
+    
+    # Créer les DataFrames de résultats
+    per_asset_trades = {}
+    per_asset_stats = {}
+    per_asset_equity = {}
+    
+    for asset in assets_data.keys():
+        if trades_history[asset]:
+            df_trades = pd.DataFrame(trades_history[asset])
+            per_asset_trades[asset] = df_trades
+            
+            # Calculer les statistiques par asset
+            winning = df_trades[df_trades['pnl'] > 0]
+            total_so = int(df_trades['so_count'].sum())
+            total_events = len(df_trades) + total_so  # Chaque SO = événement perdant
+            
+            stats = {
+                'total_trades': len(df_trades),
+                'total_orders_placed': int(len(df_trades) + total_so),
+                'total_so_placed': total_so,
+                'winning_trades': len(winning),
+                'losing_trades': len(df_trades) - len(winning),
+                'total_events': total_events,
+                'win_rate': (len(winning) / total_events * 100) if total_events > 0 else 0,
+                'total_pnl': float(df_trades['pnl'].sum()),
+                'avg_pnl_per_trade': float(df_trades['pnl'].mean()),
+                'avg_so_per_trade': float(df_trades['so_count'].mean()),
+                'max_so_used': int(df_trades['so_count'].max()),
+            }
+            per_asset_stats[asset] = stats
+        else:
+            per_asset_trades[asset] = pd.DataFrame()
+            per_asset_stats[asset] = {'total_trades': 0}
+    
+    # Calcul du drawdown basé sur l'évolution réelle du capital
+    capital_array = np.array(capital_history)
+    peak_capital = np.maximum.accumulate(capital_array)
+    drawdowns = capital_array - peak_capital
+    max_drawdown = float(np.min(drawdowns)) if len(drawdowns) > 0 else 0.0
+    max_drawdown_pct = (max_drawdown / parametres.initial_capital * 100) if parametres.initial_capital > 0 else 0.0
+    
+    # Créer l'équité combinée
+    equity_df = pd.DataFrame(equity_history)
+    if not equity_df.empty:
+        equity_df = equity_df.set_index('timestamp')
+        combined_equity = equity_df['equity']
+    else:
+        combined_equity = pd.Series()
+    
+    print(f"\n{'='*80}")
+    print(f"📈 RÉSULTATS PORTFOLIO")
+    print(f"{'='*80}")
+    print(f"Capital Initial:    ${parametres.initial_capital:,.2f}")
+    print(f"Capital Final:      ${capital_disponible:,.2f}")
+    print(f"Return:             {((capital_disponible - parametres.initial_capital) / parametres.initial_capital * 100):.2f}%")
+    print(f"Max Drawdown:       ${max_drawdown:,.2f} ({max_drawdown_pct:.2f}%)")
+    print(f"Positions ouvertes: {len(positions_ouvertes)}")
+    print(f"{'='*80}\n")
+    
+    # Créer les statistiques combinées
+    combined_stats = {
+        'initial_capital': float(parametres.initial_capital),
+        'final_capital': float(capital_disponible),
+        'total_return_pct': float((capital_disponible - parametres.initial_capital) / parametres.initial_capital * 100),
+        'max_drawdown': max_drawdown,
+        'max_drawdown_pct': max_drawdown_pct,
+        'open_positions': len(positions_ouvertes),
+        'max_active_trades': max_active_trades
+    }
+    
+    return per_asset_trades, per_asset_equity, per_asset_stats, combined_equity, combined_stats
+
+
+def evaluer_dsc(dsc_type: str, rsi: float, mfi: float, bb_pct: float, parametres: ParametresDCA_SmartBotV2) -> bool:
+    """Évalue les Deal Start Conditions"""
+    conditions = {
+        'RSI': rsi < parametres.dsc_rsi_threshold_low,
+        'MFI': mfi < parametres.mfi_threshold_low,
+        'BB': bb_pct < parametres.bb_threshold_low
+    }
+    
+    if dsc_type == "RSI":
+        return conditions['RSI']
+    elif dsc_type == "MFI":
+        return conditions['MFI']
+    elif dsc_type == "Bollinger Band %":
+        return conditions['BB']
+    elif dsc_type == "RSI + MFI":
+        return conditions['RSI'] and conditions['MFI']
+    elif dsc_type == "RSI + BB":
+        return conditions['RSI'] and conditions['BB']
+    elif dsc_type == "BB + MFI":
+        return conditions['BB'] and conditions['MFI']
+    elif dsc_type == "All Three":
+        return conditions['RSI'] and conditions['MFI'] and conditions['BB']
+    
+    return False
