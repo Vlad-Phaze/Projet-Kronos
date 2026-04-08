@@ -427,21 +427,6 @@
                                         <input type="text" id="symbol" value="BTC" required>
                                     </div>
                                     <div class="form-group">
-                                        <label>Quote
-                                            <span class="label-help">USD, USDT, EUR</span>
-                                        </label>
-                                        <input type="text" id="quote" value="USD" required>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Exchange</label>
-                                        <select id="exchange">
-                                            <option value="binance">Binance</option>
-                                            <option value="coinbase">Coinbase</option>
-                                            <option value="kraken">Kraken</option>
-                                            <option value="bitstamp">Bitstamp</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
                                         <label>Timeframe</label>
                                         <select id="timeframe">
                                             <option value="1m">1 minute</option>
@@ -671,8 +656,8 @@
             // Collect all parameters
             const params = {
                 symbol: document.getElementById('symbol').value,
-                quote: document.getElementById('quote').value,
-                exchange: document.getElementById('exchange').value,
+                quote: "USD",
+                exchange: "binance",
                 timeframe: document.getElementById('timeframe').value,
                 start_date: document.getElementById('start_date').value,
                 end_date: document.getElementById('end_date').value,
