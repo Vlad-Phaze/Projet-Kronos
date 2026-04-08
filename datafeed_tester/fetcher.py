@@ -9,6 +9,11 @@ __all__ = [
 from typing import List, Dict, Optional, Tuple
 import math
 import threading
+import os
+import pickle
+import hashlib
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Compteur global pour tracer les appels API
 _api_call_counter = 0
@@ -22,6 +27,60 @@ import re
 import ccxt
 import numpy as np
 import pandas as pd
+import yfinance as yf  # Pour les stocks US
+
+# Note: alpaca-py n'est plus nécessaire, on utilise yfinance pour les stocks US
+ALPACA_AVAILABLE = True  # yfinance est toujours disponible
+
+# =========================
+# OPTIMISATION: CACHE DES DONNÉES
+# =========================
+CACHE_DIR = Path("__datacache__")
+CACHE_ENABLED = True
+CACHE_EXPIRY_HOURS = 24  # Expiration du cache après 24h
+
+def _get_cache_key(exchange: str, base: str, timeframe: str, since_ms: int, until_ms: int) -> str:
+    """Générer une clé de cache unique basée sur les paramètres"""
+    key_str = f"{exchange}_{base}_{timeframe}_{since_ms}_{until_ms}"
+    return hashlib.md5(key_str.encode()).hexdigest()
+
+def _get_cache_path(cache_key: str) -> Path:
+    """Obtenir le chemin du fichier de cache"""
+    if not CACHE_DIR.exists():
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return CACHE_DIR / f"{cache_key}.pkl"
+
+def _load_from_cache(cache_key: str) -> Optional[pd.DataFrame]:
+    """Charger les données depuis le cache si disponibles et valides"""
+    if not CACHE_ENABLED:
+        return None
+    
+    cache_path = _get_cache_path(cache_key)
+    if not cache_path.exists():
+        return None
+    
+    # Vérifier l'âge du cache
+    cache_age_hours = (time.time() - cache_path.stat().st_mtime) / 3600
+    if cache_age_hours > CACHE_EXPIRY_HOURS:
+        return None
+    
+    try:
+        with open(cache_path, 'rb') as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+def _save_to_cache(cache_key: str, df: pd.DataFrame) -> None:
+    """Sauvegarder les données dans le cache"""
+    if not CACHE_ENABLED or df is None or df.empty:
+        return
+    
+    try:
+        cache_path = _get_cache_path(cache_key)
+        with open(cache_path, 'wb') as f:
+            pickle.dump(df, f)
+    except Exception:
+        pass  # Échec silencieux du cache
 
 # =========================
 # CONFIG PAR DÉFAUT
@@ -309,6 +368,14 @@ def fetch_ohlcv_ccxt(exchange_id: str, symbol: str, timeframe: str,
                      since_ms: int, until_ms: int, limit: int = 1000,
                      errors: Optional[List[Dict]] = None) -> pd.DataFrame:
     global _api_call_counter
+    
+    # OPTIMISATION: Vérifier le cache d'abord
+    cache_key = _get_cache_key(exchange_id, symbol, timeframe, since_ms, until_ms)
+    cached_data = _load_from_cache(cache_key)
+    if cached_data is not None:
+        print(f'      💾 CACHE HIT: {exchange_id} - {symbol}', flush=True)
+        return cached_data
+    
     try:
         cls = getattr(ccxt, exchange_id)
         ex = cls({"enableRateLimit": True})
@@ -358,11 +425,166 @@ def fetch_ohlcv_ccxt(exchange_id: str, symbol: str, timeframe: str,
         df["pair"] = symbol
         df = df[(df["timestamp"] >= since_ms) & (df["timestamp"] <= until_ms)]
         df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-        return df[["timestamp","date","open","high","low","close","volume","exchange","pair"]]
+        result = df[["timestamp","date","open","high","low","close","volume","exchange","pair"]]
+        
+        # OPTIMISATION: Sauvegarder dans le cache
+        _save_to_cache(cache_key, result)
+        
+        return result
     except Exception as e:
         log_error(errors, "fetch_ohlcv_ccxt", "Erreur pendant le téléchargement OHLCV.",
                   code="FETCH_FAIL", details=e, context={"exchange": exchange_id, "pair": symbol, "timeframe": timeframe})
         return pd.DataFrame(columns=["timestamp","date","open","high","low","close","volume","exchange","pair"])
+
+
+def fetch_ohlcv_alpaca(symbol: str, timeframe: str,
+                       since_ms: int, until_ms: int,
+                       errors: Optional[List[Dict]] = None) -> pd.DataFrame:
+    """
+    Récupère les données OHLCV pour les stocks US via Yahoo Finance (gratuit, sans clé API).
+    
+    Args:
+        symbol: Ticker du stock (ex: 'AAPL', 'TSLA')
+        timeframe: '1m', '5m', '15m', '1h', '4h', '1d'
+        since_ms: Timestamp de début en millisecondes
+        until_ms: Timestamp de fin en millisecondes
+        errors: Liste pour logger les erreurs
+    
+    Returns:
+        DataFrame avec colonnes: timestamp, date, open, high, low, close, volume, exchange, pair
+    """
+    global _api_call_counter
+    
+    # OPTIMISATION: Vérifier le cache d'abord
+    cache_key = _get_cache_key("yfinance", symbol, timeframe, since_ms, until_ms)
+    cached_data = _load_from_cache(cache_key)
+    if cached_data is not None:
+        print(f'      💾 CACHE HIT: yfinance - {symbol}', flush=True)
+        return cached_data
+    
+    try:
+        # Convertir le timeframe au format yfinance
+        tf_map = {
+            "1m": "1m",
+            "5m": "5m",
+            "15m": "15m",
+            "1h": "1h",
+            "4h": "4h",  # Note: yfinance n'a pas 4h, on utilisera 1h
+            "1d": "1d",
+        }
+        
+        if timeframe not in tf_map:
+            log_error(errors, "fetch_ohlcv_alpaca", f"Timeframe non supporté: {timeframe}",
+                      code="INVALID_TIMEFRAME", context={"symbol": symbol, "timeframe": timeframe})
+            return pd.DataFrame(columns=["timestamp","date","open","high","low","close","volume","exchange","pair"])
+        
+        yf_interval = tf_map[timeframe]
+        
+        # Pour 4h, utiliser 1h car yfinance ne supporte pas 4h directement
+        if timeframe == "4h":
+            yf_interval = "1h"
+        
+        # Convertir timestamps ms en datetime
+        start_dt = datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc)
+        end_dt = datetime.fromtimestamp(until_ms / 1000, tz=timezone.utc)
+        
+        # Yahoo Finance limite: données intraday (< 1d) seulement pour les 730 derniers jours
+        # Si la période demandée dépasse 730 jours et qu'on demande du intraday, basculer sur 1d
+        days_requested = (end_dt - start_dt).days
+        if days_requested > 730 and timeframe != "1d":
+            print(f'      ⚠️  Période de {days_requested} jours dépasse la limite de 730j pour {timeframe}', flush=True)
+            print(f'      ↪️  Bascule automatique sur timeframe 1d (données journalières)', flush=True)
+            yf_interval = "1d"
+            # Mettre à jour le cache key pour refléter le timeframe réel utilisé
+            cache_key = _get_cache_key("yfinance", symbol, "1d", since_ms, until_ms)
+        
+        with _api_call_lock:
+            _api_call_counter += 1
+            print(f'      🌐 API Call #{_api_call_counter}: yfinance - {symbol}', flush=True)
+        
+        # Télécharger les données via yfinance
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(
+            start=start_dt,
+            end=end_dt,
+            interval=yf_interval,
+            auto_adjust=False,  # Garder les prix non ajustés
+            actions=False  # Pas besoin des dividendes/splits
+        )
+        
+        if df.empty:
+            log_error(errors, "fetch_ohlcv_alpaca", "Aucune donnée retournée par Yahoo Finance.",
+                      code="EMPTY_OHLCV", context={"symbol": symbol, "timeframe": timeframe})
+            return pd.DataFrame(columns=["timestamp","date","open","high","low","close","volume","exchange","pair"])
+        
+        # Renommer les colonnes (yfinance utilise des majuscules)
+        df = df.rename(columns={
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume"
+        })
+        
+        # Réinitialiser l'index pour avoir la date comme colonne
+        df = df.reset_index()
+        df = df.rename(columns={"index": "date", "Date": "date", "Datetime": "date"})
+        
+        # S'assurer que la colonne date existe
+        if "date" not in df.columns and df.index.name in ["Date", "Datetime"]:
+            df["date"] = df.index
+            df = df.reset_index(drop=True)
+        
+        # Convertir en timestamp milliseconds
+        df["timestamp"] = (pd.to_datetime(df["date"]).astype(int) // 10**6).astype(int)
+        
+        # Ajouter métadonnées
+        df["exchange"] = "yfinance"
+        df["pair"] = symbol
+        
+        # Filtrer et nettoyer
+        df = df[(df["timestamp"] >= since_ms) & (df["timestamp"] <= until_ms)]
+        df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        
+        # Sélectionner les colonnes finales
+        result = df[["timestamp","date","open","high","low","close","volume","exchange","pair"]]
+        
+        # OPTIMISATION: Sauvegarder dans le cache
+        _save_to_cache(cache_key, result)
+        
+        return result
+        
+    except Exception as e:
+        log_error(errors, "fetch_ohlcv_alpaca", "Erreur pendant le téléchargement depuis Yahoo Finance.",
+                  code="FETCH_FAIL", details=e, context={"symbol": symbol, "timeframe": timeframe})
+        return pd.DataFrame(columns=["timestamp","date","open","high","low","close","volume","exchange","pair"])
+
+
+def fetch_ohlcv(exchange: str, symbol: str, timeframe: str,
+                since_ms: int, until_ms: int, limit: int = 1000,
+                errors: Optional[List[Dict]] = None) -> pd.DataFrame:
+    """
+    Fonction dispatcher pour récupérer OHLCV depuis différentes sources.
+    
+    Args:
+        exchange: 'binance', 'coinbase', 'alpaca', etc.
+        symbol: Pour crypto: 'BTC/USD', pour stocks: 'AAPL'
+        timeframe: '1m', '5m', '15m', '1h', '4h', '1d'
+        since_ms: Timestamp de début en millisecondes
+        until_ms: Timestamp de fin en millisecondes
+        limit: Nombre max de barres par requête (pour CCXT)
+        errors: Liste pour logger les erreurs
+    
+    Returns:
+        DataFrame avec colonnes: timestamp, date, open, high, low, close, volume, exchange, pair
+    """
+    if exchange.lower() == "alpaca":
+        # Pour Alpaca, le symbol est juste le ticker (ex: 'AAPL')
+        return fetch_ohlcv_alpaca(symbol, timeframe, since_ms, until_ms, errors)
+    else:
+        # Pour les exchanges crypto via CCXT
+        return fetch_ohlcv_ccxt(exchange, symbol, timeframe, since_ms, until_ms, limit, errors)
+
 
 # =========================
 # OUTILS NUMÉRIQUES
@@ -665,7 +887,7 @@ def compare_exchanges_on_bases(exchanges: List[str],
             pair = pick["pair"]
             if pair is None:
                 continue
-            df = fetch_ohlcv_ccxt(fixed_exchange, pair, timeframe, since_ms, until_ms, errors=errors)
+            df = fetch_ohlcv(fixed_exchange, pair, timeframe, since_ms, until_ms, errors=errors)
             if df.empty:
                 continue
 
@@ -692,21 +914,37 @@ def compare_exchanges_on_bases(exchanges: List[str],
             continue  # prochaine base
 
         # === selection == "best" ===
+        # OPTIMISATION: Parallélisation du téléchargement des données
         # 1) Collecte de toutes les sources autorisées (df non vides)
-        source_dfs = []
-        source_meta = []  # (exchange, pair)
-        for ex_id in ex_list:
+        
+        def fetch_for_exchange(ex_id):
+            """Fonction helper pour télécharger en parallèle"""
             pick = pick_tradable_pair_on_exchange(ex_id, base, preferred_quotes,
                                                   include_derivatives=include_derivatives, errors=errors)
             pair = pick["pair"]
             if pair is None:
-                continue
-            df = fetch_ohlcv_ccxt(ex_id, pair, timeframe, since_ms, until_ms, errors=errors)
+                return None
+            df = fetch_ohlcv(ex_id, pair, timeframe, since_ms, until_ms, errors=errors)
             if df.empty:
-                continue
-            source_dfs.append(df)
-            source_meta.append((ex_id, pair))
-            data[ex_id][base] = df
+                return None
+            return (ex_id, pair, df)
+        
+        # Téléchargement parallèle avec ThreadPoolExecutor
+        source_dfs = []
+        source_meta = []  # (exchange, pair)
+        
+        with ThreadPoolExecutor(max_workers=min(len(ex_list), 5)) as executor:
+            # Soumettre toutes les tâches
+            future_to_exchange = {executor.submit(fetch_for_exchange, ex_id): ex_id for ex_id in ex_list}
+            
+            # Récupérer les résultats au fur et à mesure
+            for future in as_completed(future_to_exchange):
+                result = future.result()
+                if result is not None:
+                    ex_id, pair, df = result
+                    source_dfs.append(df)
+                    source_meta.append((ex_id, pair))
+                    data[ex_id][base] = df
 
         if not source_dfs:
             log_error(errors, "compare_exchanges_on_bases",

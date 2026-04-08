@@ -403,8 +403,9 @@
             <p class="subtitle">Advanced DCA Strategy Configuration & Backtesting</p>
             <div class="nav-links">
                 <a href="index.html">Dashboard</a>
-                <a href="run_multi_smartbot.html">Multi-Asset</a>
-                <a href="#">Documentation</a>
+                <a href="run_multi_smartbot.html">Crypto Multi</a>
+                <a href="configure_smartbot_stocks.html">Stocks Single</a>
+                <a href="run_multi_smartbot_stocks.html">Stocks Multi</a>
             </div>
         </header>
 
@@ -717,12 +718,53 @@
             }
         });
 
+        function buildDisplayStats(data) {
+            const stats = data.statistics || {};
+            const positions = Array.isArray(data.tradingview_positions) ? data.tradingview_positions : [];
+            const initialCapital = Number(stats.initial_capital || 0);
+            const totalTrades = positions.length;
+            const totalPnl = positions.reduce((sum, position) => sum + Number(position.pnl || 0), 0);
+            const winningTrades = positions.filter(position => Number(position.pnl || 0) > 0).length;
+            const totalDeals = positions.filter(position => String(position.type || '').startsWith('BO_')).length;
+            const totalSoPlaced = positions.filter(position => String(position.type || '').startsWith('SO_')).length;
+            const maxSoUsed = positions.reduce((maxValue, position) => {
+                const match = String(position.type || '').match(/^SO_(\d+)$/);
+                return match ? Math.max(maxValue, Number(match[1])) : maxValue;
+            }, 0);
+            const avgPnlPerTrade = totalTrades > 0 ? totalPnl / totalTrades : 0;
+            const avgSoPerTrade = totalDeals > 0 ? totalSoPlaced / totalDeals : 0;
+            const capitalReturnPct = initialCapital > 0 ? (totalPnl / initialCapital) * 100 : 0;
+            const finalCapital = initialCapital + totalPnl;
+            const largestWin = positions.length > 0 ? Math.max(...positions.map(position => Number(position.pnl || 0))) : 0;
+            const largestLoss = positions.length > 0 ? Math.min(...positions.map(position => Number(position.pnl || 0))) : 0;
+            const winRateTradingview = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0;
+
+            return {
+                initial_capital: initialCapital,
+                final_capital: finalCapital,
+                capital_return_pct: capitalReturnPct,
+                total_trades: totalTrades,
+                total_deals: totalDeals,
+                total_so_placed: totalSoPlaced,
+                total_pnl: totalPnl,
+                avg_pnl_per_trade: avgPnlPerTrade,
+                avg_so_per_trade: avgSoPerTrade,
+                max_so_used: maxSoUsed,
+                largest_win: largestWin,
+                largest_loss: largestLoss,
+                win_rate_tradingview: winRateTradingview,
+                max_drawdown: Number(stats.max_drawdown || 0),
+                max_drawdown_pct: Number(stats.max_drawdown_pct || 0),
+                open_trades_at_end: Number(stats.open_trades_at_end || 0)
+            };
+        }
+
         function displayResults(data) {
             console.log('📊 Data reçue:', data);
             console.log('📋 Positions TradingView:', data.tradingview_positions);
             
             const statsGrid = document.getElementById('statsGrid');
-            const stats = data.statistics;
+            const stats = buildDisplayStats(data);
 
             statsGrid.innerHTML = `
                 <div class="stat-card">
@@ -748,9 +790,9 @@
                     <div class="stat-value">${stats.total_trades || 0}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Skipped Trades</div>
-                    <div class="stat-value negative">
-                        ${stats.skipped_trades || 0}
+                    <div class="stat-label">Total SO Placed</div>
+                    <div class="stat-value">
+                        ${stats.total_so_placed || 0}
                     </div>
                 </div>
                 <div class="stat-card">
@@ -794,6 +836,12 @@
                     <div class="stat-label">Largest Win</div>
                     <div class="stat-value positive">
                         $${stats.largest_win?.toFixed(2) || 0}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Largest Loss</div>
+                    <div class="stat-value negative">
+                        $${Math.abs(stats.largest_loss || 0).toFixed(2)}
                     </div>
                 </div>
             `;
@@ -862,6 +910,21 @@
                     fill: 'tozeroy',
                     fillcolor: 'rgba(0, 0, 0, 0.1)'
                 };
+                const equityTraces = [equityTrace];
+
+                if (data.open_trade && data.open_trade.current_time) {
+                    const openPnl = Number(data.open_trade.unrealized_pnl || 0);
+                    equityTraces.push({
+                        x: [data.open_trade.current_time],
+                        y: [equityValues[equityValues.length - 1]],
+                        type: 'scatter',
+                        mode: 'markers+text',
+                        name: 'Trade En Cours',
+                        text: [`OPEN (${openPnl >= 0 ? '+' : ''}${openPnl.toFixed(2)}$)`],
+                        textposition: 'top center',
+                        marker: {color: '#1f77b4', size: 11, symbol: 'diamond'}
+                    });
+                }
                 
                 const equityLayout = {
                     title: {
@@ -897,7 +960,7 @@
                 };
                 
                 // 4. Afficher le graphique d'équité
-                Plotly.newPlot('equity-chart', [equityTrace], equityLayout, {responsive: true});
+                Plotly.newPlot('equity-chart', equityTraces, equityLayout, {responsive: true});
                 
                 // 5. Afficher le graphique de prix (déjà au format Plotly)
                 Plotly.newPlot('price-chart', data.price_chart.data, data.price_chart.layout, {responsive: true});
@@ -933,6 +996,8 @@
                             <thead>
                                 <tr style="background: #f5f5f5; border-bottom: 2px solid #000000;">
                                     <th style="padding: 12px 8px; text-align: left; font-weight: 600;">Type</th>
+                                    <th style="padding: 12px 8px; text-align: left; font-weight: 600;">Entry Date</th>
+                                    <th style="padding: 12px 8px; text-align: left; font-weight: 600;">Exit / Current Date</th>
                                     <th style="padding: 12px 8px; text-align: right; font-weight: 600;">Entry</th>
                                     <th style="padding: 12px 8px; text-align: right; font-weight: 600;">Exit</th>
                                     <th style="padding: 12px 8px; text-align: right; font-weight: 600;">Qty</th>
@@ -940,35 +1005,49 @@
                                     <th style="padding: 12px 8px; text-align: right; font-weight: 600;">P&L ($)</th>
                                     <th style="padding: 12px 8px; text-align: right; font-weight: 600;">P&L (%)</th>
                                     <th style="padding: 12px 8px; text-align: center; font-weight: 600;">Status</th>
+                                    <th style="padding: 12px 8px; text-align: left; font-weight: 600;">Progress</th>
                                 </tr>
                             </thead>
                             <tbody>
             `;
             
             positions.forEach((pos, idx) => {
-                const isWin = pos.pnl > 0;
-                const statusColor = isWin ? '#10b981' : '#ef4444';
-                const statusText = isWin ? 'WIN' : 'LOSS';
+                const pnl = Number(pos.pnl || 0);
+                const pnlPct = Number(pos.pnl_pct || 0);
+                const entryPrice = Number(pos.entry_price || 0);
+                const exitPrice = Number(pos.exit_price || 0);
+                const qty = Number(pos.qty || 0);
+                const sizeUsd = Number(pos.size_usd || 0);
+                const isOpen = (pos.status || '').toUpperCase() === 'OPEN';
+                const isWin = pnl > 0;
+                const statusColor = isOpen ? '#1f77b4' : (isWin ? '#10b981' : '#ef4444');
+                const statusText = isOpen ? 'OPEN' : (isWin ? 'WIN' : 'LOSS');
                 const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
+                const progressText = pos.progress || (isOpen ? 'Trade en cours' : '-');
+                const entryTime = pos.entry_time || '-';
+                const exitTime = pos.exit_time || '-';
                 
                 html += `
                     <tr style="background: ${rowBg}; border-bottom: 1px solid #e0e0e0;">
                         <td style="padding: 10px 8px; font-weight: 500;">${pos.type}</td>
-                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${pos.entry_price.toFixed(2)}</td>
-                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${pos.exit_price.toFixed(2)}</td>
-                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">${pos.qty.toFixed(6)}</td>
-                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${pos.size_usd.toFixed(2)}</td>
+                        <td style="padding: 10px 8px; font-family: monospace;">${entryTime}</td>
+                        <td style="padding: 10px 8px; font-family: monospace;">${exitTime}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${entryPrice.toFixed(2)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${exitPrice.toFixed(2)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">${qty.toFixed(6)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${sizeUsd.toFixed(2)}</td>
                         <td style="padding: 10px 8px; text-align: right; font-family: monospace; color: ${statusColor}; font-weight: 600;">
-                            ${pos.pnl >= 0 ? '+' : ''}$${pos.pnl.toFixed(2)}
+                            ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}
                         </td>
                         <td style="padding: 10px 8px; text-align: right; font-family: monospace; color: ${statusColor}; font-weight: 600;">
-                            ${pos.pnl_pct >= 0 ? '+' : ''}${pos.pnl_pct.toFixed(2)}%
+                            ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%
                         </td>
                         <td style="padding: 10px 8px; text-align: center;">
                             <span style="background: ${statusColor}; color: white; padding: 4px 10px; border-radius: 3px; font-weight: 600; font-size: 11px;">
                                 ${statusText}
                             </span>
                         </td>
+                        <td style="padding: 10px 8px; font-size: 12px; color: #555555;">${progressText}</td>
                     </tr>
                 `;
             });

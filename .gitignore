@@ -32,6 +32,9 @@ Thumbs.db
 *.tmp
 *.temp
 
+# Data cache (optimisation)
+__datacache__/
+
 # Reports (generated files)
 rapport_*.html
 *_rapport_*.html
