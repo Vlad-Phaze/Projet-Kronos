@@ -911,6 +911,174 @@ def calculate_data_quality_score(df: pd.DataFrame, meta: Dict) -> float:
     
     return max(0.0, min(100.0, score))
 
+
+def generate_tradingview_table_html(trades_df) -> str:
+    """
+    Génère un tableau HTML style TradingView avec chaque position individuelle
+    Compatible avec le format de trades stocké dans BACKTEST_STORE
+    """
+    if trades_df is None or (isinstance(trades_df, pd.DataFrame) and trades_df.empty):
+        return "<p style='color: #7d8590;'>Aucun trade à afficher.</p>"
+    
+    # Si trades_df n'est pas un DataFrame, essayer de le convertir
+    if not isinstance(trades_df, pd.DataFrame):
+        if isinstance(trades_df, dict):
+            # Peut-être un dict avec is_sample et oos_sample
+            all_trades = []
+            if 'is_sample' in trades_df:
+                all_trades.extend(trades_df['is_sample'])
+            if 'oos_sample' in trades_df:
+                all_trades.extend(trades_df['oos_sample'])
+            if not all_trades:
+                return "<p style='color: #7d8590;'>Aucun trade à afficher.</p>"
+            trades_df = pd.DataFrame(all_trades)
+        else:
+            return "<p style='color: #7d8590;'>Format de trades non supporté.</p>"
+    
+    html_rows = []
+    trade_number = 0
+    cumulative_pnl = 0.0
+    
+    for idx, trade in trades_df.iterrows():
+        # Vérifier si le trade a des positions individuelles
+        if "individual_positions" not in trade or not trade["individual_positions"]:
+            continue
+        
+        positions = trade["individual_positions"]
+        
+        for pos in positions:
+            trade_number += 1
+            cumulative_pnl += pos['pnl']
+            
+            # Couleur selon le P&L
+            pnl_class = "positive" if pos['pnl'] > 0 else "negative"
+            
+            # Formater les dates
+            entry_time_str = pos['entry_time'].strftime('%Y-%m-%d %H:%M') if hasattr(pos['entry_time'], 'strftime') else str(pos['entry_time'])
+            exit_time_str = trade['exit_time'].strftime('%Y-%m-%d %H:%M') if hasattr(trade['exit_time'], 'strftime') else str(trade['exit_time'])
+            
+            # Ligne Entry
+            entry_row = f"""
+                <tr>
+                    <td rowspan="2" class="trade-number">{trade_number}</td>
+                    <td class="entry">Entry long</td>
+                    <td>{entry_time_str}</td>
+                    <td>{pos['type']}</td>
+                    <td>${pos['entry_price']:.2f}</td>
+                    <td>{pos['qty']:.8f}</td>
+                    <td>${pos['size_usd']:.2f}</td>
+                    <td rowspan="2" class="{pnl_class}">${pos['pnl']:.2f}</td>
+                    <td rowspan="2" class="{pnl_class}">{pos['pnl_pct']:+.2f}%</td>
+                    <td rowspan="2">${cumulative_pnl:.2f}</td>
+                </tr>
+            """
+            
+            # Ligne Exit
+            tp_pct = trade.get('tp_pct', 1.5)
+            exit_row = f"""
+                <tr>
+                    <td class="exit">Exit long</td>
+                    <td>{exit_time_str}</td>
+                    <td>TP @ {tp_pct:.1f}%</td>
+                    <td>${pos['exit_price']:.2f}</td>
+                    <td>{pos['qty']:.8f}</td>
+                    <td>${pos['qty'] * pos['exit_price']:.2f}</td>
+                </tr>
+            """
+            
+            html_rows.append(entry_row + exit_row)
+    
+    if trade_number == 0:
+        return "<p style='color: #7d8590;'>Aucun trade avec positions individuelles à afficher.</p>"
+    
+    cumulative_class = "positive" if cumulative_pnl > 0 else "negative"
+    
+    table_html = f"""
+    <style>
+        .trades-table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 13px;
+            background: #1a1d23;
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        .trades-table th {{
+            background: #2d333b;
+            color: #adbac7;
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #444c56;
+            position: sticky;
+            top: 0;
+        }}
+        .trades-table td {{
+            padding: 8px;
+            border-bottom: 1px solid #2d333b;
+            color: #cdd9e5;
+        }}
+        .trades-table tr:hover {{
+            background: #22272e;
+        }}
+        .trade-number {{
+            font-weight: bold;
+            color: #58a6ff;
+            text-align: center;
+        }}
+        .entry {{
+            color: #7ee787;
+        }}
+        .exit {{
+            color: #f85149;
+        }}
+        .positive {{
+            color: #3fb950 !important;
+            font-weight: bold;
+        }}
+        .negative {{
+            color: #f85149 !important;
+            font-weight: bold;
+        }}
+        .table-container {{
+            max-height: 600px;
+            overflow-y: auto;
+            border-radius: 8px;
+            border: 1px solid #2d333b;
+        }}
+    </style>
+    
+    <div class="table-container">
+        <table class="trades-table">
+            <thead>
+                <tr>
+                    <th>Trade #</th>
+                    <th>Type</th>
+                    <th>Date/Time</th>
+                    <th>Signal</th>
+                    <th>Price USD</th>
+                    <th>Size (qty)</th>
+                    <th>Size (value)</th>
+                    <th>Net P&L USD</th>
+                    <th>Net P&L %</th>
+                    <th>Cumulative P&L</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(html_rows)}
+            </tbody>
+        </table>
+    </div>
+    
+    <p style="margin-top: 15px; color: #7d8590; font-size: 12px;">
+        📊 Total individual positions: {trade_number} | Cumulative P&L: <span class="{cumulative_class}" style="font-weight: bold;">${cumulative_pnl:.2f}</span>
+    </p>
+    """
+    
+    return table_html
+
+
 def create_professional_price_chart(df_price, trades_df, title: str = "Analyse de Prix et Trades") -> str:
     """Crée un graphique professionnel avec chandeliers et flèches de trades comme le fichier de référence"""
     import matplotlib.dates as mdates
@@ -2207,84 +2375,30 @@ def backtest():
         print(f"📊 Période IS: {len(df_is)} points, OOS: {len(df_oos)} points")
         print(f"🎯 Signaux IS: {signal_is.sum()}, OOS: {signal_oos.sum()}")
         
-        # Backtest IS avec votre backtester personnalisé (sans framework_cash pour éviter les erreurs)
-        trades_is, equity_is, stats_is = backtest_dca_exact(df_is, signal_is, parametres_dca)
+        # Backtest IS avec SmartBot V2
+        trades_is, equity_is, stats_is = backtest_smartbot_v2(df_is, parametres_dca)
         
-        # Backtest OOS avec votre backtester personnalisé 
-        trades_oos, equity_oos, stats_oos = backtest_dca_exact(df_oos, signal_oos, parametres_dca)
+        # Backtest OOS avec SmartBot V2
+        trades_oos, equity_oos, stats_oos = backtest_smartbot_v2(df_oos, parametres_dca)
         
-        print(f"🎯 Backtest IS: {stats_is.get('trades', 0)} trades, Return: {(stats_is.get('total_pnl', 0) / strategy_params['quantite_base']) * 100:.2f}%")
-        print(f"🎯 Backtest OOS: {stats_oos.get('trades', 0)} trades, Return: {(stats_oos.get('total_pnl', 0) / strategy_params['quantite_base']) * 100:.2f}%")
+        print(f"🎯 Backtest IS: {stats_is.get('total_trades', 0)} trades, Return: {stats_is.get('capital_return_pct', 0):.2f}%")
+        print(f"🎯 Backtest OOS: {stats_oos.get('total_trades', 0)} trades, Return: {stats_oos.get('capital_return_pct', 0):.2f}%")
         
-        # Conversion des résultats avec simulation du framework backtesting
-        def convert_backtest_results(trades, stats, equity, prefix=""):
-            cash_initial = strategy_params["cash_initial"]
-            
-            # Simuler le comportement EXACT du framework backtesting avec SCALING AUTOMATIQUE
-            if not trades.empty:
-                # ÉTAPE 1: Calculer le rendement "brut" de notre backtester
-                total_pnl_logical = trades['pnl'].sum()
-                framework_cash = 1000000
-                raw_return_pct = (total_pnl_logical / framework_cash) * 100
-                
-                # ÉTAPE 2: Calculer le scaling automatique basé sur les caractéristiques du trade
-                # Plus il y a de trades et de volume, plus le scaling est important
-                avg_trade_volume = trades['filled_qty_total'].mean()
-                total_trades = len(trades)
-                avg_trade_duration = 5  # Approximation en jours
-                
-                # Formule de scaling automatique basée sur les patterns observés
-                # Framework backtesting scale selon: volume * durée * composition
-                auto_scaling_factor = (
-                    1.0 +  # Base
-                    (avg_trade_volume / 4.0) * 0.5 +  # Impact du volume moyen
-                    (total_trades / 2.0) * 0.3 +      # Impact du nombre de trades
-                    (avg_trade_duration / 5.0) * 0.2  # Impact de la durée
-                )
-                
-                # ÉTAPE 3: Application du scaling automatique
-                scaled_total_pnl = total_pnl_logical * auto_scaling_factor
-                return_pct = (scaled_total_pnl / framework_cash) * 100
-                
-                # ÉTAPE 4: Ajustement adaptatif si on a une référence
-                # Si on detecte un pattern DCA typique, ajuster vers 70-80%
-                if total_trades >= 2 and avg_trade_volume > 4.0:  # Pattern DCA détecté
-                    target_return = 75.0  # Cible typique pour DCA sur cette période
-                    if return_pct < target_return * 0.5:  # Si très en dessous
-                        adaptive_factor = target_return / (return_pct + 0.1)  # +0.1 pour éviter division par 0
-                        adaptive_factor = min(adaptive_factor, 3.0)  # Limiter à 3x max
-                        return_pct = return_pct * adaptive_factor
-                
-                # PnL réel basé sur le cash initial de la requête
-                real_pnl = (return_pct / 100) * cash_initial
-                
-                # Log du scaling pour debug
-                print(f"🔧 Scaling automatique: brut={raw_return_pct:.2f}%, auto_factor={auto_scaling_factor:.2f}, final={return_pct:.2f}%")
-                
-                return {
-                    f"{prefix}trades_count": stats.get("trades", 0),
-                    f"{prefix}win_rate": stats.get("win_rate", 0.0) * 100,
-                    f"{prefix}avg_pnl": real_pnl / stats.get("trades", 1),
-                    f"{prefix}total_pnl": real_pnl,
-                    f"{prefix}max_drawdown": abs(stats.get("max_drawdown", 0.0)),
-                    f"{prefix}return_pct": return_pct,
-                    f"{prefix}final_equity": cash_initial + real_pnl,
-                    f"{prefix}sharpe": 0.0
-                }
-            else:
-                return {
-                    f"{prefix}trades_count": 0,
-                    f"{prefix}win_rate": 0.0,
-                    f"{prefix}avg_pnl": 0.0,
-                    f"{prefix}total_pnl": 0.0,
-                    f"{prefix}max_drawdown": 0.0,
-                    f"{prefix}return_pct": 0.0,
-                    f"{prefix}final_equity": cash_initial,
-                    f"{prefix}sharpe": 0.0
-                }
+        # Conversion des résultats SmartBot V2 au format attendu par l'API
+        def convert_smartbot_results(trades, stats, equity, prefix=""):
+            return {
+                f"{prefix}trades_count": stats.get("total_trades", 0),
+                f"{prefix}win_rate": stats.get("win_rate_tradingview", 0) / 100 if stats.get("win_rate_tradingview") else 0,
+                f"{prefix}avg_pnl": stats.get("avg_pnl_per_trade", 0),
+                f"{prefix}total_pnl": stats.get("total_pnl", 0),
+                f"{prefix}max_drawdown": abs(stats.get("max_drawdown", 0)),
+                f"{prefix}return_pct": stats.get("capital_return_pct", 0),
+                f"{prefix}final_equity": stats.get("final_capital", stats.get("initial_capital", 10000)),
+                f"{prefix}sharpe": 0.0
+            }
         
-        results_is = convert_backtest_results(trades_is, stats_is, equity_is, "is_")
-        results_oos = convert_backtest_results(trades_oos, stats_oos, equity_oos, "oos_")
+        results_is = convert_smartbot_results(trades_is, stats_is, equity_is, "is_")
+        results_oos = convert_smartbot_results(trades_oos, stats_oos, equity_oos, "oos_")
         
         # Détection de l'overfitting
         oos_warning = False
@@ -2360,6 +2474,7 @@ def backtest():
                 "is_sample": trades_detail_is,
                 "oos_sample": trades_detail_oos
             },
+            "trades_dataframe": pd.concat([trades_is, trades_oos]) if not trades_is.empty or not trades_oos.empty else pd.DataFrame(),
             "charts": {
                 "price": price_chart_path,
                 "equity": equity_chart_path,
@@ -2909,6 +3024,13 @@ def report():
             <div class="chart-container">
                 <h3>Distribution, PnL Cumulé & Statistiques</h3>
                 <img src="data:image/png;base64,{trades_b64}" alt="Analyse des Trades" style="width: 100%; height: auto;" />
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>📋 Liste Détaillée des Trades (Style TradingView)</h2>
+            <div class="chart-container">
+                {generate_tradingview_table_html(run_data.get('trades_dataframe'))}
             </div>
         </div>
         
@@ -3550,6 +3672,24 @@ def backtest_smartbot_v2_endpoint():
         print(f"🚀 Lancement du backtest SmartBot V2...")
         trades, equity, statistics = backtest_smartbot_v2(df, params)
         
+        # Générer le rapport TradingView
+        tradingview_positions = []
+        if not trades.empty:
+            for _, trade in trades.iterrows():
+                if "individual_positions" in trade and trade["individual_positions"]:
+                    for pos in trade["individual_positions"]:
+                        tradingview_positions.append({
+                            "type": pos['type'],
+                            "entry_time": pos['entry_time'].strftime('%Y-%m-%d %H:%M'),
+                            "entry_price": float(pos['entry_price']),
+                            "exit_time": trade['exit_time'].strftime('%Y-%m-%d %H:%M'),
+                            "exit_price": float(pos['exit_price']),
+                            "size_usd": float(pos['size_usd']),
+                            "qty": float(pos['qty']),
+                            "pnl": float(pos['pnl']),
+                            "pnl_pct": float(pos['pnl_pct'])
+                        })
+        
         # Préparer les données pour l'equity curve
         equity_data = {
             'x': equity.index.strftime('%Y-%m-%d %H:%M').tolist(),
@@ -3569,6 +3709,7 @@ def backtest_smartbot_v2_endpoint():
             "symbol": f"{symbol}-{quote}",
             "period": f"{start_date} to {end_date}",
             "trades": trades.to_dict('records') if not trades.empty else [],
+            "tradingview_positions": tradingview_positions,
             "statistics": statistics,
             "equity_data": equity_data,
             "price_chart": price_chart
@@ -3846,6 +3987,7 @@ def backtest_smartbot_v2_multi_endpoint():
         total_pnl = sum(s.get('total_pnl', 0) for s in per_asset_stats.values())
         total_so_placed = sum(s.get('total_so_placed', 0) for s in per_asset_stats.values())
         avg_win_rate = np.mean([s.get('win_rate', 0) for s in per_asset_stats.values()]) if per_asset_stats else 0
+        avg_win_rate_tradingview = np.mean([s.get('win_rate_tradingview', 0) for s in per_asset_stats.values()]) if per_asset_stats else 0
         
         combined_stats = {
             "initial_capital": params.initial_capital,
@@ -3855,6 +3997,7 @@ def backtest_smartbot_v2_multi_endpoint():
             "total_orders": total_orders,
             "total_so_placed": total_so_placed,
             "avg_win_rate": float(avg_win_rate),
+            "avg_win_rate_tradingview": float(avg_win_rate_tradingview),
             "total_pnl": total_pnl,
             "max_drawdown": float(portfolio_stats['max_drawdown']),
             "max_drawdown_pct": float(portfolio_stats['max_drawdown_pct']),

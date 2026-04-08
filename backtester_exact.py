@@ -343,6 +343,48 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 pnl_net = gross_proceeds - total_invested - total_fees
                 profit_pct = ((exit_price / avg_entry_price) - 1) * 100.0
                 
+                # Calculer le P&L de chaque position individuelle (comme TradingView)
+                individual_positions = []
+                
+                # 1. Base Order P&L
+                bo_qty = parametres.base_order / base_order_price
+                bo_proceeds = exit_price * bo_qty
+                bo_fees = (parametres.base_order + bo_proceeds) * parametres.commission
+                bo_pnl = bo_proceeds - parametres.base_order - bo_fees
+                bo_pnl_pct = ((exit_price / base_order_price) - 1) * 100.0
+                
+                individual_positions.append({
+                    "type": "BO_0",
+                    "entry_time": indice[entry_bar],
+                    "entry_price": base_order_price,
+                    "size_usd": parametres.base_order,
+                    "qty": bo_qty,
+                    "exit_price": exit_price,
+                    "pnl": bo_pnl,
+                    "pnl_pct": bo_pnl_pct
+                })
+                
+                # 2. Chaque Safety Order P&L
+                for so_info in current_trade_so_list:
+                    so_size = so_info['size']
+                    so_price = so_info['price']
+                    so_qty = so_size / so_price
+                    so_proceeds = exit_price * so_qty
+                    so_fees = (so_size + so_proceeds) * parametres.commission
+                    so_pnl = so_proceeds - so_size - so_fees
+                    so_pnl_pct = ((exit_price / so_price) - 1) * 100.0
+                    
+                    individual_positions.append({
+                        "type": f"SO_{so_info['number']}",
+                        "entry_time": so_info['time'],
+                        "entry_price": so_price,
+                        "size_usd": so_size,
+                        "qty": so_qty,
+                        "exit_price": exit_price,
+                        "pnl": so_pnl,
+                        "pnl_pct": so_pnl_pct
+                    })
+                
                 transactions.append({
                     "entry_time": indice[entry_bar],
                     "exit_time": indice[t],
@@ -356,7 +398,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     "total_invested": total_invested,
                     "total_position_size": total_position_size,
                     "pnl": pnl_net,
-                    "pnl_pct": profit_pct
+                    "pnl_pct": profit_pct,
+                    "individual_positions": individual_positions
                 })
                 
                 pnl_realise[t] = pnl_net
@@ -456,6 +499,48 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             pnl_net = gross_proceeds - total_invested - total_fees
             profit_pct = ((prix_final / avg_entry_price) - 1) * 100.0
             
+            # Calculer le P&L de chaque position individuelle
+            individual_positions = []
+            
+            # Base Order
+            bo_qty = parametres.base_order / base_order_price
+            bo_proceeds = prix_final * bo_qty
+            bo_fees = (parametres.base_order + bo_proceeds) * parametres.commission
+            bo_pnl = bo_proceeds - parametres.base_order - bo_fees
+            bo_pnl_pct = ((prix_final / base_order_price) - 1) * 100.0
+            
+            individual_positions.append({
+                "type": "BO_0",
+                "entry_time": indice[entry_bar],
+                "entry_price": base_order_price,
+                "size_usd": parametres.base_order,
+                "qty": bo_qty,
+                "exit_price": prix_final,
+                "pnl": bo_pnl,
+                "pnl_pct": bo_pnl_pct
+            })
+            
+            # Chaque Safety Order
+            for so_info in current_trade_so_list:
+                so_size = so_info['size']
+                so_price = so_info['price']
+                so_qty = so_size / so_price
+                so_proceeds = prix_final * so_qty
+                so_fees = (so_size + so_proceeds) * parametres.commission
+                so_pnl = so_proceeds - so_size - so_fees
+                so_pnl_pct = ((prix_final / so_price) - 1) * 100.0
+                
+                individual_positions.append({
+                    "type": f"SO_{so_info['number']}",
+                    "entry_time": so_info['time'],
+                    "entry_price": so_price,
+                    "size_usd": so_size,
+                    "qty": so_qty,
+                    "exit_price": prix_final,
+                    "pnl": so_pnl,
+                    "pnl_pct": so_pnl_pct
+                })
+            
             transactions.append({
                 "entry_time": indice[entry_bar],
                 "exit_time": indice[-1],
@@ -469,7 +554,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 "total_invested": total_invested,
                 "total_position_size": total_position_size,
                 "pnl": pnl_net,
-                "pnl_pct": profit_pct
+                "pnl_pct": profit_pct,
+                "individual_positions": individual_positions
             })
             
             pnl_realise[-1] = pnl_net
@@ -512,11 +598,23 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
         total_so_placed = int(df_trades["so_count"].sum()) if "so_count" in df_trades.columns else 0
         total_orders_including_so = total_orders + total_so_placed
         
-        # Win rate ajusté : chaque SO compte comme un événement perdant
-        # Total événements = tous les BO + tous les SO
-        # Événements gagnants = seulement les trades profitables (TP final profitable)
-        total_events = len(df_trades) + total_so_placed
-        win_rate_adjusted = float(len(winning_trades) / total_events * 100) if total_events > 0 else 0.0
+        # NOUVEAU: Calcul Win Rate à la TradingView
+        # Compter les positions individuelles gagnantes vs perdantes
+        total_individual_positions = 0
+        winning_individual_positions = 0
+        
+        for _, trade in df_trades.iterrows():
+            if "individual_positions" in trade and trade["individual_positions"]:
+                for pos in trade["individual_positions"]:
+                    total_individual_positions += 1
+                    if pos["pnl"] > 0:
+                        winning_individual_positions += 1
+        
+        # Win Rate TradingView = positions individuelles gagnantes / total positions individuelles
+        win_rate_tradingview = float(winning_individual_positions / total_individual_positions * 100) if total_individual_positions > 0 else 0.0
+        
+        # Ancien win rate (deals complets)
+        win_rate_deals = float(len(winning_trades) / len(df_trades) * 100) if len(df_trades) > 0 else 0.0
         
         statistiques = {
             "total_trades": len(df_trades),
@@ -524,8 +622,10 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             "total_so_placed": total_so_placed,
             "winning_trades": len(winning_trades),
             "losing_trades": len(losing_trades),
-            "total_events": total_events,  # BO + SO (pour calcul win rate)
-            "win_rate": win_rate_adjusted,
+            "total_individual_positions": total_individual_positions,
+            "winning_individual_positions": winning_individual_positions,
+            "win_rate_tradingview": win_rate_tradingview,  # Win rate comme TradingView
+            "win_rate_deals": win_rate_deals,  # Win rate des deals complets
             "total_pnl": float(df_trades["pnl"].sum()),
             "avg_pnl_per_trade": float(df_trades["pnl"].mean()),
             "avg_win": float(winning_trades["pnl"].mean()) if len(winning_trades) > 0 else 0.0,
@@ -558,9 +658,10 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
         print(f"-"*80)
         print(f"Deals totaux:       {statistiques['total_trades']}")
         print(f"Ordres totaux:      {statistiques['total_orders_placed']} (BO + SO)")
-        print(f"Événements totaux:  {statistiques['total_events']} (chaque SO = événement perdant)")
-        print(f"Deals gagnants:     {statistiques['winning_trades']} ({statistiques['win_rate']:.1f}%)")
-        print(f"Deals perdants:     {statistiques['losing_trades']} + {statistiques['total_so_placed']} SO")
+        print(f"Positions totales:  {statistiques['total_individual_positions']} (comptage TradingView)")
+        print(f"Positions WIN:      {statistiques['winning_individual_positions']}")
+        print(f"Win Rate (TV):      {statistiques['win_rate_tradingview']:.2f}% (comme TradingView)")
+        print(f"Win Rate (Deals):   {statistiques['win_rate_deals']:.2f}% (deals complets)")
         print(f"Deals skipped:      {statistiques['skipped_trades']}")
         if statistiques.get('open_trades_at_end', 0) > 0:
             print(f"⚠️ Trades ouverts:  {statistiques['open_trades_at_end']}")
@@ -574,6 +675,249 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     print("="*80)
     
     return df_trades, courbe_equite, statistiques
+
+
+def print_tradingview_style_report(df_trades: pd.DataFrame):
+    """
+    Affiche un rapport détaillé comme TradingView avec chaque position individuelle
+    """
+    if df_trades.empty:
+        print("Aucun trade à afficher.")
+        return
+    
+    print("\n" + "="*120)
+    print("📊 DÉTAIL DES TRADES (Style TradingView)")
+    print("="*120)
+    
+    trade_number = 0
+    for idx, trade in df_trades.iterrows():
+        if "individual_positions" not in trade or not trade["individual_positions"]:
+            continue
+        
+        positions = trade["individual_positions"]
+        
+        # Afficher chaque position individuelle
+        for pos in positions:
+            trade_number += 1
+            
+            print(f"\n{'─'*120}")
+            print(f"Trade #{trade_number} - {pos['type']}")
+            print(f"{'─'*120}")
+            print(f"  Entry:        {pos['entry_time'].strftime('%Y-%m-%d %H:%M')} @ ${pos['entry_price']:.2f}")
+            print(f"  Exit:         {trade['exit_time'].strftime('%Y-%m-%d %H:%M')} @ ${pos['exit_price']:.2f}")
+            print(f"  Size (USD):   ${pos['size_usd']:.2f}")
+            print(f"  Size (Qty):   {pos['qty']:.8f}")
+            
+            # Afficher le P&L avec couleur
+            pnl_symbol = "✅" if pos['pnl'] > 0 else "❌"
+            print(f"  Net P&L:      {pnl_symbol} ${pos['pnl']:.2f} ({pos['pnl_pct']:+.2f}%)")
+        
+        # Résumé du deal complet
+        print(f"\n{'─'*120}")
+        print(f"📌 DEAL SUMMARY:")
+        print(f"  Total Invested:  ${trade['total_invested']:.2f}")
+        print(f"  Avg Entry:       ${trade['avg_entry_price']:.2f}")
+        print(f"  Exit Price:      ${trade['exit_price']:.2f}")
+        print(f"  SO Count:        {trade['so_count']}")
+        deal_symbol = "✅" if trade['pnl'] > 0 else "❌"
+        print(f"  Deal P&L:        {deal_symbol} ${trade['pnl']:.2f} ({trade['pnl_pct']:+.2f}%)")
+        print(f"{'─'*120}")
+    
+    print("\n" + "="*120)
+    print(f"Total Trades Displayed: {trade_number}")
+    print("="*120 + "\n")
+
+
+def generate_tradingview_html_table(df_trades: pd.DataFrame) -> str:
+    """
+    Génère un tableau HTML style TradingView avec chaque position individuelle
+    """
+    if df_trades.empty:
+        return "<p>Aucun trade à afficher.</p>"
+    
+    html_rows = []
+    trade_number = 0
+    cumulative_pnl = 0.0
+    
+    for idx, trade in df_trades.iterrows():
+        if "individual_positions" not in trade or not trade["individual_positions"]:
+            continue
+        
+        positions = trade["individual_positions"]
+        
+        for pos in positions:
+            trade_number += 1
+            cumulative_pnl += pos['pnl']
+            
+            # Couleur selon le P&L
+            pnl_class = "positive" if pos['pnl'] > 0 else "negative"
+            
+            # Ligne Entry
+            entry_row = f"""
+                <tr>
+                    <td rowspan="2" class="trade-number">{trade_number}</td>
+                    <td class="entry">Entry long</td>
+                    <td>{pos['entry_time'].strftime('%Y-%m-%d %H:%M')}</td>
+                    <td>{pos['type']}</td>
+                    <td>${pos['entry_price']:.2f}</td>
+                    <td>{pos['qty']:.8f}</td>
+                    <td>${pos['size_usd']:.2f}</td>
+                    <td rowspan="2" class="{pnl_class}">${pos['pnl']:.2f}</td>
+                    <td rowspan="2" class="{pnl_class}">{pos['pnl_pct']:+.2f}%</td>
+                    <td rowspan="2">${cumulative_pnl:.2f}</td>
+                </tr>
+            """
+            
+            # Ligne Exit
+            exit_row = f"""
+                <tr>
+                    <td class="exit">Exit long</td>
+                    <td>{trade['exit_time'].strftime('%Y-%m-%d %H:%M')}</td>
+                    <td>TP @ {trade.get('tp_pct', 1.5):.1f}%</td>
+                    <td>${pos['exit_price']:.2f}</td>
+                    <td>{pos['qty']:.8f}</td>
+                    <td>${pos['qty'] * pos['exit_price']:.2f}</td>
+                </tr>
+            """
+            
+            html_rows.append(entry_row + exit_row)
+    
+    table_html = f"""
+    <style>
+        .trades-table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 13px;
+            background: #1a1d23;
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        .trades-table th {{
+            background: #2d333b;
+            color: #adbac7;
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #444c56;
+            position: sticky;
+            top: 0;
+        }}
+        .trades-table td {{
+            padding: 8px;
+            border-bottom: 1px solid #2d333b;
+            color: #cdd9e5;
+        }}
+        .trades-table tr:hover {{
+            background: #22272e;
+        }}
+        .trade-number {{
+            font-weight: bold;
+            color: #58a6ff;
+            text-align: center;
+        }}
+        .entry {{
+            color: #7ee787;
+        }}
+        .exit {{
+            color: #f85149;
+        }}
+        .positive {{
+            color: #3fb950 !important;
+            font-weight: bold;
+        }}
+        .negative {{
+            color: #f85149 !important;
+            font-weight: bold;
+        }}
+        .table-container {{
+            max-height: 600px;
+            overflow-y: auto;
+            border-radius: 8px;
+            border: 1px solid #2d333b;
+        }}
+    </style>
+    
+    <div class="table-container">
+        <table class="trades-table">
+            <thead>
+                <tr>
+                    <th>Trade #</th>
+                    <th>Type</th>
+                    <th>Date/Time</th>
+                    <th>Signal</th>
+                    <th>Price USD</th>
+                    <th>Size (qty)</th>
+                    <th>Size (value)</th>
+                    <th>Net P&L USD</th>
+                    <th>Net P&L %</th>
+                    <th>Cumulative P&L</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(html_rows)}
+            </tbody>
+        </table>
+    </div>
+    
+    <p style="margin-top: 15px; color: #7d8590; font-size: 12px;">
+        📊 Total trades: {trade_number} | Cumulative P&L: <span style="color: {'#3fb950' if cumulative_pnl > 0 else '#f85149'}; font-weight: bold;">${cumulative_pnl:.2f}</span>
+    </p>
+    """
+    
+    return table_html
+
+
+def export_tradingview_csv(df_trades: pd.DataFrame, filename: str = "backtest_tradingview.csv"):
+    """
+    Export les trades au format CSV comme TradingView
+    """
+    if df_trades.empty:
+        print("Aucun trade à exporter.")
+        return
+    
+    rows = []
+    trade_number = 0
+    
+    for idx, trade in df_trades.iterrows():
+        if "individual_positions" not in trade or not trade["individual_positions"]:
+            continue
+        
+        positions = trade["individual_positions"]
+        
+        for pos in positions:
+            trade_number += 1
+            
+            # Ligne Exit
+            rows.append({
+                "Trade #": trade_number,
+                "Type": "Exit long",
+                "Date and time": trade['exit_time'].strftime('%Y-%m-%d %H:%M'),
+                "Signal": f"TP @ {trade['pnl_pct']:.1f}%",
+                "Price USD": pos['exit_price'],
+                "Size (qty)": pos['qty'],
+                "Size (value)": pos['size_usd'],
+                "Net P&L USD": pos['pnl'],
+                "Net P&L %": pos['pnl_pct'],
+            })
+            
+            # Ligne Entry
+            rows.append({
+                "Trade #": trade_number,
+                "Type": "Entry long",
+                "Date and time": pos['entry_time'].strftime('%Y-%m-%d %H:%M'),
+                "Signal": pos['type'],
+                "Price USD": pos['entry_price'],
+                "Size (qty)": pos['qty'],
+                "Size (value)": pos['size_usd'],
+                "Net P&L USD": pos['pnl'],
+                "Net P&L %": pos['pnl_pct'],
+            })
+    
+    df_export = pd.DataFrame(rows)
+    df_export.to_csv(filename, index=False)
+    print(f"✅ Export CSV TradingView: {filename}")
+    return df_export
 
 
 if __name__ == "__main__":
@@ -640,17 +984,11 @@ if __name__ == "__main__":
     # Exécution du backtest
     trades, equity, stats = backtest_smartbot_v2(data, params)
     
-    # Affichage des trades
-    if not trades.empty:
-        print("\n📋 DÉTAIL DES TRADES:")
-        print("-"*80)
-        for i, trade in trades.iterrows():
-            entry_date = trade['entry_time'].strftime('%Y-%m-%d')
-            exit_date = trade['exit_time'].strftime('%Y-%m-%d')
-            pnl_color = "✅" if trade['pnl'] > 0 else "❌"
-            print(f"Trade #{i+1:2d} | {entry_date} → {exit_date} | "
-                  f"Entry: ${trade['entry_price']:8.2f} | Exit: ${trade['exit_price']:8.2f} | "
-                  f"SOs: {trade['so_count']:2d} | {pnl_color} ${trade['pnl']:8.2f} ({trade['pnl_pct']:5.2f}%)")
+    # Affichage du rapport TradingView style
+    print_tradingview_style_report(trades)
+    
+    # Export CSV
+    export_tradingview_csv(trades, "backtest_smartbot_v2_tradingview.csv")
     
     print("\n✨ Backtest terminé!")
 
@@ -914,6 +1252,31 @@ def backtest_smartbot_v2_multi_portfolio(
             total_so = int(df_trades['so_count'].sum())
             total_events = len(df_trades) + total_so  # Chaque SO = événement perdant
             
+            # Calculer le Win Rate TradingView (chaque position individuelle compte)
+            individual_positions = []
+            for _, trade in df_trades.iterrows():
+                # Base Order (BO_0)
+                bo_pnl = trade['pnl'] if trade['so_count'] == 0 else 0
+                individual_positions.append({
+                    'type': 'BO_0',
+                    'pnl': bo_pnl,
+                    'is_win': bo_pnl > 0
+                })
+                
+                # Safety Orders (SO_1, SO_2, etc.)
+                for so_idx in range(trade['so_count']):
+                    # Les SO sont considérés comme des pertes car ils baissent le prix moyen
+                    individual_positions.append({
+                        'type': f'SO_{so_idx + 1}',
+                        'pnl': 0,  # PnL distribué sur le BO
+                        'is_win': False  # SO = toujours perte selon TradingView
+                    })
+            
+            # Compter les positions gagnantes
+            positions_win = sum(1 for p in individual_positions if p['is_win'])
+            total_positions = len(individual_positions)
+            win_rate_tradingview = (positions_win / total_positions * 100) if total_positions > 0 else 0
+            
             stats = {
                 'total_trades': len(df_trades),
                 'total_orders_placed': int(len(df_trades) + total_so),
@@ -922,10 +1285,13 @@ def backtest_smartbot_v2_multi_portfolio(
                 'losing_trades': len(df_trades) - len(winning),
                 'total_events': total_events,
                 'win_rate': (len(winning) / total_events * 100) if total_events > 0 else 0,
+                'win_rate_tradingview': float(win_rate_tradingview),
+                'total_positions': total_positions,
                 'total_pnl': float(df_trades['pnl'].sum()),
                 'avg_pnl_per_trade': float(df_trades['pnl'].mean()),
                 'avg_so_per_trade': float(df_trades['so_count'].mean()),
                 'max_so_used': int(df_trades['so_count'].max()),
+                'individual_positions': individual_positions  # Garder pour le tableau
             }
             per_asset_stats[asset] = stats
         else:

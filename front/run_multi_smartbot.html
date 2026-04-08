@@ -726,11 +726,11 @@
                     <div class="stat-value">${stats.total_trades || 0}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Win Rate (Avg)</div>
-                    <div class="stat-value ${stats.avg_win_rate >= 50 ? 'positive' : 'negative'}">
-                        ${stats.avg_win_rate?.toFixed(1) || 0}%
+                    <div class="stat-label">Win Rate (Avg TradingView)</div>
+                    <div class="stat-value ${(stats.avg_win_rate_tradingview || stats.avg_win_rate || 0) >= 50 ? 'positive' : 'negative'}">
+                        ${(stats.avg_win_rate_tradingview || stats.avg_win_rate || 0).toFixed(1)}%
                     </div>
-                    <div style="font-size: 0.7em; color: #666; margin-top: 5px;">SO = perte</div>
+                    <div style="font-size: 0.7em; color: #666; margin-top: 5px;">Méthode TradingView</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Max Drawdown</div>
@@ -764,6 +764,7 @@
             
             Object.entries(perAsset).forEach(([asset, astats]) => {
                 const chartId = `price-chart-${asset}`;
+                const tableId = `trades-table-${asset}`;
                 perAssetHTML += `
                     <div style="background: #f5f5f5; border-left: 4px solid ${astats.total_pnl >= 0 ? '#000000' : '#999999'}">
                         <div style="padding: 15px; cursor: pointer; user-select: none;" onclick="toggleChart('${chartId}', 'arrow-${asset}')">
@@ -773,14 +774,17 @@
                             </div>
                             <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.9em; margin-top: 10px;">
                                 <div><strong>Deals:</strong> ${astats.total_trades || 0}</div>
-                                <div title="Chaque SO compte comme un événement perdant"><strong>Win Rate:</strong> ${astats.win_rate?.toFixed(1) || 0}%</div>
+                                <div title="Méthode TradingView: chaque position (BO, SO1, SO2...) compte séparément"><strong>Win Rate (TV):</strong> ${(astats.win_rate_tradingview || astats.win_rate || 0).toFixed(1)}%</div>
                                 <div><strong>PnL:</strong> $${astats.total_pnl?.toFixed(2) || 0}</div>
                                 <div><strong>SO Placed:</strong> ${astats.total_so_placed || 0}</div>
                                 <div><strong>Avg SO/Deal:</strong> ${astats.avg_so_per_trade?.toFixed(1) || 0}</div>
                                 ${astats.open_trades_at_end > 0 ? `<div style="color: #999;"><strong>Open at End:</strong> ${astats.open_trades_at_end}</div>` : ''}
                             </div>
                         </div>
-                        <div id="${chartId}" style="display: none; padding: 15px; background: white; border-top: 1px solid #ddd;"></div>
+                        <div id="${chartId}" style="display: none; padding: 15px; background: white; border-top: 1px solid #ddd;">
+                            <div id="${chartId}-container" style="margin-bottom: 20px;"></div>
+                            <div id="${tableId}" style="width: 100%;"></div>
+                        </div>
                     </div>
                 `;
             });
@@ -869,13 +873,75 @@
             if (data.per_asset_charts) {
                 Object.entries(data.per_asset_charts).forEach(([asset, chartData]) => {
                     const chartId = `price-chart-${asset}`;
-                    const chartDiv = document.getElementById(chartId);
+                    const chartContainerId = `${chartId}-container`;
+                    const tableId = `trades-table-${asset}`;
+                    
+                    const chartDiv = document.getElementById(chartContainerId);
                     if (chartDiv) {
                         // Render the chart using Plotly (chartData is already in Plotly format)
-                        Plotly.newPlot(chartId, chartData.data, chartData.layout, {responsive: true});
+                        Plotly.newPlot(chartContainerId, chartData.data, chartData.layout, {responsive: true});
+                    }
+                    
+                    // Render the trades table if individual_positions exists
+                    if (perAsset[asset] && perAsset[asset].individual_positions) {
+                        displayTradingViewTableForAsset(tableId, perAsset[asset].individual_positions, asset);
                     }
                 });
             }
+        }
+        
+        function displayTradingViewTableForAsset(tableId, positions, asset) {
+            const tableContainer = document.getElementById(tableId);
+            if (!tableContainer || !positions || positions.length === 0) return;
+            
+            let html = `
+                <div style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 4px; overflow: hidden; margin-top: 20px;">
+                    <div style="background: #000000; color: #ffffff; padding: 12px; font-weight: bold; font-size: 14px;">
+                        Détail des Positions ${asset} (Style TradingView)
+                    </div>
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                            <thead>
+                                <tr style="background: #f5f5f5; border-bottom: 2px solid #000000;">
+                                    <th style="padding: 10px 8px; text-align: left; font-weight: 600;">Type</th>
+                                    <th style="padding: 10px 8px; text-align: center; font-weight: 600;">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+            
+            positions.forEach((pos, idx) => {
+                const isWin = pos.is_win;
+                const statusColor = isWin ? '#10b981' : '#ef4444';
+                const statusText = isWin ? 'WIN' : 'LOSS';
+                const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
+                
+                html += `
+                    <tr style="background: ${rowBg}; border-bottom: 1px solid #e0e0e0;">
+                        <td style="padding: 8px; font-weight: 500;">${pos.type}</td>
+                        <td style="padding: 8px; text-align: center;">
+                            <span style="background: ${statusColor}; color: white; padding: 3px 8px; border-radius: 3px; font-weight: 600; font-size: 10px;">
+                                ${statusText}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style="padding: 10px; background: #f9f9f9; font-size: 11px; color: #666; border-top: 1px solid #e0e0e0;">
+                        <strong>Total Positions:</strong> ${positions.length} | 
+                        <strong>WIN:</strong> ${positions.filter(p => p.is_win).length} | 
+                        <strong>LOSS:</strong> ${positions.filter(p => !p.is_win).length} | 
+                        <strong>Win Rate:</strong> ${((positions.filter(p => p.is_win).length / positions.length) * 100).toFixed(1)}%
+                    </div>
+                </div>
+            `;
+            
+            tableContainer.innerHTML = html;
         }
 
         function toggleChart(chartId, arrowId) {

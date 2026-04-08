@@ -341,6 +341,7 @@
             margin: 0 auto;
             width: 100%;
             display: flex;
+            flex-direction: column;
             justify-content: center;
         }
         
@@ -732,6 +733,9 @@
         });
 
         function displayResults(data) {
+            console.log('📊 Data reçue:', data);
+            console.log('📋 Positions TradingView:', data.tradingview_positions);
+            
             const statsGrid = document.getElementById('statsGrid');
             const stats = data.statistics;
 
@@ -765,11 +769,11 @@
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Win Rate</div>
-                    <div class="stat-value ${stats.win_rate >= 50 ? 'positive' : 'negative'}">
-                        ${stats.win_rate?.toFixed(1) || 0}%
+                    <div class="stat-label">Win Rate (TradingView)</div>
+                    <div class="stat-value ${(stats.win_rate_tradingview || stats.win_rate || 0) >= 50 ? 'positive' : 'negative'}">
+                        ${(stats.win_rate_tradingview || stats.win_rate || 0).toFixed(1)}%
                     </div>
-                    <div style="font-size: 0.7em; color: #666; margin-top: 5px;" title="Chaque SO compte comme un événement perdant">SO = perte</div>
+                    <div style="font-size: 0.7em; color: #666; margin-top: 5px;" title="Chaque position (BO, SO1, SO2...) compte séparément">Méthode TradingView</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">PnL Total</div>
@@ -813,15 +817,46 @@
             const chartContainer = document.getElementById('chartContainer');
             
             if (data.equity_data && data.price_chart) {
-                // Créer le conteneur pour les graphiques
-                chartContainer.innerHTML = `
-                    <div style="display: flex; gap: 20px; max-width: 1800px; margin: 0 auto; padding: 20px;">
-                        <div id="equity-chart" style="flex: 1; background: #ffffff;"></div>
-                        <div id="price-chart" style="flex: 1; background: #ffffff;"></div>
-                    </div>
-                `;
+                // Vider complètement le conteneur
+                chartContainer.innerHTML = '';
                 
-                // Créer le graphique d'équité avec Y-axis optimisée
+                // 1. Créer le conteneur des graphiques (flex, côte à côte)
+                const chartsRow = document.createElement('div');
+                chartsRow.style.display = 'flex';
+                chartsRow.style.gap = '20px';
+                chartsRow.style.maxWidth = '1800px';
+                chartsRow.style.margin = '0 auto';
+                chartsRow.style.padding = '20px';
+                
+                // Créer div pour equity chart
+                const equityDiv = document.createElement('div');
+                equityDiv.id = 'equity-chart';
+                equityDiv.style.flex = '1';
+                equityDiv.style.background = '#ffffff';
+                chartsRow.appendChild(equityDiv);
+                
+                // Créer div pour price chart
+                const priceDiv = document.createElement('div');
+                priceDiv.id = 'price-chart';
+                priceDiv.style.flex = '1';
+                priceDiv.style.background = '#ffffff';
+                chartsRow.appendChild(priceDiv);
+                
+                // Ajouter la ligne des graphiques au conteneur principal
+                chartContainer.appendChild(chartsRow);
+                
+                // 2. Créer le conteneur du tableau (pleine largeur, EN DESSOUS)
+                const tableContainer = document.createElement('div');
+                tableContainer.id = 'trades-table-container';
+                tableContainer.style.width = '100%';
+                tableContainer.style.maxWidth = '1800px';
+                tableContainer.style.margin = '0 auto';
+                tableContainer.style.padding = '0 20px 20px 20px';
+                
+                // Ajouter le conteneur du tableau EN DESSOUS des graphiques
+                chartContainer.appendChild(tableContainer);
+                
+                // 3. Créer le graphique d'équité avec Y-axis optimisée
                 const equityValues = data.equity_data.y;
                 const initialCapital = stats.initial_capital || equityValues[0];
                 const minEquity = Math.min(...equityValues);
@@ -876,13 +911,91 @@
                     }]
                 };
                 
+                // 4. Afficher le graphique d'équité
                 Plotly.newPlot('equity-chart', [equityTrace], equityLayout, {responsive: true});
                 
-                // Afficher le graphique de prix (déjà au format Plotly)
+                // 5. Afficher le graphique de prix (déjà au format Plotly)
                 Plotly.newPlot('price-chart', data.price_chart.data, data.price_chart.layout, {responsive: true});
+                
+                // 6. Afficher le tableau TradingView des positions individuelles EN DESSOUS
+                if (data.tradingview_positions && data.tradingview_positions.length > 0) {
+                    displayTradingViewTable(data.tradingview_positions);
+                }
             } else {
                 chartContainer.innerHTML = '<p style="color: #999999; text-align: center; padding: 40px;">NO DATA AVAILABLE</p>';
             }
+        }
+        
+        function displayTradingViewTable(positions) {
+            console.log('📊 displayTradingViewTable appelée avec:', positions);
+            console.log('📊 Nombre de positions:', positions?.length);
+            
+            const tableContainer = document.getElementById('trades-table-container');
+            console.log('📊 Container trouvé:', tableContainer);
+            
+            if (!tableContainer) {
+                console.error('❌ Container trades-table-container non trouvé!');
+                return;
+            }
+            
+            let html = `
+                <div style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 4px; overflow: hidden;">
+                    <div style="background: #000000; color: #ffffff; padding: 15px; font-weight: bold; font-size: 16px;">
+                        Détail des Positions (Style TradingView)
+                    </div>
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                            <thead>
+                                <tr style="background: #f5f5f5; border-bottom: 2px solid #000000;">
+                                    <th style="padding: 12px 8px; text-align: left; font-weight: 600;">Type</th>
+                                    <th style="padding: 12px 8px; text-align: right; font-weight: 600;">Entry</th>
+                                    <th style="padding: 12px 8px; text-align: right; font-weight: 600;">Exit</th>
+                                    <th style="padding: 12px 8px; text-align: right; font-weight: 600;">Qty</th>
+                                    <th style="padding: 12px 8px; text-align: right; font-weight: 600;">Size ($)</th>
+                                    <th style="padding: 12px 8px; text-align: right; font-weight: 600;">P&L ($)</th>
+                                    <th style="padding: 12px 8px; text-align: right; font-weight: 600;">P&L (%)</th>
+                                    <th style="padding: 12px 8px; text-align: center; font-weight: 600;">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+            
+            positions.forEach((pos, idx) => {
+                const isWin = pos.pnl > 0;
+                const statusColor = isWin ? '#10b981' : '#ef4444';
+                const statusText = isWin ? 'WIN' : 'LOSS';
+                const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
+                
+                html += `
+                    <tr style="background: ${rowBg}; border-bottom: 1px solid #e0e0e0;">
+                        <td style="padding: 10px 8px; font-weight: 500;">${pos.type}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${pos.entry_price.toFixed(2)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${pos.exit_price.toFixed(2)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">${pos.qty.toFixed(6)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${pos.size_usd.toFixed(2)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace; color: ${statusColor}; font-weight: 600;">
+                            ${pos.pnl >= 0 ? '+' : ''}$${pos.pnl.toFixed(2)}
+                        </td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace; color: ${statusColor}; font-weight: 600;">
+                            ${pos.pnl_pct >= 0 ? '+' : ''}${pos.pnl_pct.toFixed(2)}%
+                        </td>
+                        <td style="padding: 10px 8px; text-align: center;">
+                            <span style="background: ${statusColor}; color: white; padding: 4px 10px; border-radius: 3px; font-weight: 600; font-size: 11px;">
+                                ${statusText}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            
+            tableContainer.innerHTML = html;
         }
     </script>
 </body>
