@@ -1,6 +1,6 @@
 # Pour rendre l'import explicite
 __all__ = [
-    "compare_exchanges_on_bases",
+    "fetch_binance_only",
     "expand_coin_inputs",
     "fetch_top_markets",
     "EXCHANGES",
@@ -783,6 +783,121 @@ def overall_quality_score(m: Dict[str, float]) -> float:
     for k, w in WEIGHTS.items():
         score += w * max(0.0, min(1.0, parts.get(k, 0.0)))
     return float(score)
+
+# =========================
+# FONCTION SIMPLIFIÉE - BINANCE UNIQUEMENT
+# =========================
+def fetch_binance_only(bases: List[str],
+                       timeframe: str,
+                       lookback_days: int,
+                       preferred_quotes=PREFERRED_QUOTES,
+                       since_ms: Optional[int] = None,
+                       until_ms: Optional[int] = None):
+    """
+    Fonction simplifiée qui récupère les données uniquement depuis Binance.
+    Beaucoup plus rapide car pas de comparaison multi-exchanges.
+    
+    Args:
+        bases: Liste des cryptos (ex: ['BTC', 'ETH'])
+        timeframe: '1m', '5m', '15m', '1h', '4h', '1d'
+        lookback_days: Nombre de jours de données
+        preferred_quotes: Quotes préférées ('USDT', 'USD', etc.)
+        since_ms: Timestamp de début en ms (optionnel)
+        until_ms: Timestamp de fin en ms (optionnel)
+    
+    Returns:
+        (agg, detail, data) - Format compatible avec compare_exchanges_on_bases
+    """
+    global _api_call_counter
+    with _api_call_lock:
+        _api_call_counter = 0
+    
+    print(f'   🚀 BINANCE ONLY: Fetching {len(bases)} cryptos from Binance')
+    errors: List[Dict] = []
+    
+    # Fenêtre temporelle
+    if since_ms is not None and until_ms is not None:
+        since_dt = datetime.fromtimestamp(since_ms / 1000.0, tz=timezone.utc)
+        until_dt = datetime.fromtimestamp(until_ms / 1000.0, tz=timezone.utc)
+    else:
+        until_dt = datetime.now(timezone.utc)
+        since_dt = until_dt - timedelta(days=lookback_days)
+        since_ms = int(since_dt.timestamp() * 1000)
+        until_ms = int(until_dt.timestamp() * 1000)
+    
+    # Résolution des bases
+    resolved_rows = []
+    for b in bases:
+        r = resolve_symbol_via_coingecko(b, errors=errors)
+        if r["resolved_symbol"] is None:
+            log_error(errors, "fetch_binance_only",
+                      "Crypto introuvable.", code="BASE_NOT_FOUND", context={"input": b})
+        else:
+            resolved_rows.append({
+                "base_input": b,
+                "resolved_symbol": r["resolved_symbol"],
+                "resolved_id": r["resolved_id"]
+            })
+    
+    # Containers résultats
+    rows = []
+    data = {"binance": {}, "__FINAL__": {}, "__FINAL_META__": {}, "__ERRORS__": errors}
+    
+    # Boucle par base
+    for row_base in resolved_rows:
+        base_input = row_base["base_input"]
+        base = row_base["resolved_symbol"]
+        print(f"  📊 Fetching {base_input} → {base} from Binance...")
+        
+        # Trouver la paire sur Binance
+        pick = pick_tradable_pair_on_exchange("binance", base, preferred_quotes,
+                                              include_derivatives=False, errors=errors)
+        pair = pick["pair"]
+        if pair is None:
+            log_error(errors, "fetch_binance_only", f"Paire non trouvée pour {base} sur Binance",
+                      code="NO_PAIR", context={"base": base})
+            continue
+        
+        # Télécharger les données
+        df = fetch_ohlcv("binance", pair, timeframe, since_ms, until_ms, errors=errors)
+        if df.empty:
+            log_error(errors, "fetch_binance_only", f"Aucune donnée pour {base}",
+                      code="EMPTY_DATA", context={"base": base, "pair": pair})
+            continue
+        
+        # Stocker les données
+        data["binance"][base] = df
+        data["__FINAL__"][base] = df[["timestamp","date","open","high","low","close","volume"]].copy()
+        data["__FINAL_META__"][base] = {
+            "mode": "binance_only",
+            "exchange": "binance",
+            "pair": pair,
+            "score": 1.0,  # Score parfait car source unique
+            "provenance": f"Données issues de Binance ({pair})"
+        }
+        
+        rows.append({
+            "exchange": "binance",
+            "base_input": base_input,
+            "base": base,
+            "pair": pair,
+            "score": 1.0,
+            "rows": len(df)
+        })
+        
+        print(f"    ✅ {base} @ Binance → {pair} | {len(df)} rows")
+    
+    # Résultats agrégés
+    detail = pd.DataFrame(rows)
+    if not detail.empty:
+        agg = pd.DataFrame([{"exchange": "binance", "mean_score": 1.0}])
+    else:
+        agg = pd.DataFrame(columns=["exchange", "mean_score"])
+    
+    print(f'   ✅ BINANCE ONLY COMPLETE: Total API calls = {_api_call_counter}')
+    
+    return agg, detail, data
+
 
 # =========================
 # ORCHESTRATION (sélection des sources, scoring, provenance)

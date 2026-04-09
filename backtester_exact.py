@@ -1193,6 +1193,71 @@ if __name__ == "__main__":
     print("\n✨ Backtest terminé!")
 
 
+def _calculate_individual_positions_multi(
+    position: Dict,
+    exit_price: float,
+    exit_time: pd.Timestamp,
+    parametres: ParametresDCA_SmartBotV2,
+    is_win: bool
+) -> List[Dict]:
+    """
+    Calcule les positions individuelles pour un trade dans le multi-portfolio
+    IMPORTANT: Chaque position (BO, SO1, etc.) a son propre P&L
+    """
+    individual_positions = []
+    
+    # Formater exit_time
+    exit_time_str = exit_time.strftime('%Y-%m-%d %H:%M:%S') if hasattr(exit_time, 'strftime') else str(exit_time)
+    
+    # Base Order
+    bo_qty = (parametres.base_order / position['entry_price']) * (1 - parametres.commission)
+    bo_exit_value = exit_price * bo_qty * (1 - parametres.commission)
+    bo_pnl = bo_exit_value - parametres.base_order
+    bo_pnl_pct = ((exit_price / position['entry_price']) - 1) * 100.0
+    bo_is_win = bo_pnl > 0
+    
+    individual_positions.append({
+        "type": "BO_1",
+        "entry_time": position['entry_time'].strftime('%Y-%m-%d %H:%M:%S') if hasattr(position['entry_time'], 'strftime') else str(position['entry_time']),
+        "exit_time": exit_time_str,
+        "entry_price": float(position['entry_price']),
+        "size_usd": float(parametres.base_order),
+        "qty": float(bo_qty),
+        "exit_price": float(exit_price),
+        "pnl": float(bo_pnl),
+        "pnl_pct": float(bo_pnl_pct),
+        "is_win": bo_is_win
+    })
+    
+    # Safety Orders
+    so_times = position['so_list'].get('times', [])
+    so_prices = position['so_list'].get('prices', [])
+    
+    for so_idx, (so_time, so_price) in enumerate(zip(so_times, so_prices), 1):
+        so_scale = parametres.safe_order_volume_scale ** (so_idx - 1)
+        so_size = parametres.safe_order * so_scale
+        so_qty = (so_size / so_price) * (1 - parametres.commission)
+        so_exit_value = exit_price * so_qty * (1 - parametres.commission)
+        so_pnl = so_exit_value - so_size
+        so_pnl_pct = ((exit_price / so_price) - 1) * 100.0
+        so_is_win = so_pnl > 0
+        
+        individual_positions.append({
+            "type": f"SO_{so_idx}",
+            "entry_time": so_time.strftime('%Y-%m-%d %H:%M:%S') if hasattr(so_time, 'strftime') else str(so_time),
+            "exit_time": exit_time_str,
+            "entry_price": float(so_price),
+            "size_usd": float(so_size),
+            "qty": float(so_qty),
+            "exit_price": float(exit_price),
+            "pnl": float(so_pnl),
+            "pnl_pct": float(so_pnl_pct),
+            "is_win": so_is_win
+        })
+    
+    return individual_positions
+
+
 def backtest_smartbot_v2_multi_portfolio(
     assets_data: Dict[str, pd.DataFrame],
     parametres: ParametresDCA_SmartBotV2,
@@ -1298,6 +1363,12 @@ def backtest_smartbot_v2_multi_portfolio(
                     capital_history_array[capital_event_idx] = capital_disponible
                     capital_event_idx += 1
                 
+                # Calculer les positions individuelles
+                is_win = pnl > 0
+                individual_positions = _calculate_individual_positions_multi(
+                    position, current_price, timestamp, parametres, is_win
+                )
+                
                 # Enregistrer le trade
                 trades_history[asset].append({
                     'entry_time': position['entry_time'],
@@ -1310,7 +1381,8 @@ def backtest_smartbot_v2_multi_portfolio(
                     'so_prices': position['so_list'].get('prices', []),
                     'invested': position['invested'],
                     'pnl': pnl,
-                    'pnl_pct': pnl_pct
+                    'pnl_pct': pnl_pct,
+                    'individual_positions': individual_positions
                 })
                 
                 print(f"✅ [{ timestamp.strftime('%Y-%m-%d')}] TAKE PROFIT {asset} @ ${current_price:.2f} | "
@@ -1450,6 +1522,12 @@ def backtest_smartbot_v2_multi_portfolio(
             
             capital_disponible += exit_value
             
+            # Calculer les positions individuelles
+            is_win = pnl > 0
+            individual_positions = _calculate_individual_positions_multi(
+                position, final_price, df.index[-1], parametres, is_win
+            )
+            
             trades_history[asset].append({
                 'entry_time': position['entry_time'],
                 'entry_price': position['entry_price'],
@@ -1461,7 +1539,8 @@ def backtest_smartbot_v2_multi_portfolio(
                 'so_prices': position['so_list']['prices'],
                 'invested': position['invested'],
                 'pnl': pnl,
-                'pnl_pct': pnl_pct
+                'pnl_pct': pnl_pct,
+                'individual_positions': individual_positions
             })
             
             print(f"🔚 [{df.index[-1].strftime('%Y-%m-%d')}] CLÔTURE FORCÉE {asset} @ ${final_price:.2f} | "
@@ -1496,21 +1575,21 @@ def backtest_smartbot_v2_multi_portfolio(
         bo_pnl_pct = ((final_price / position['entry_price']) - 1) * 100.0
         
         open_individual_positions.append({
-            "type": "BO_0",
-            "entry_time": position['entry_time'],
-            "entry_price": position['entry_price'],
-            "size_usd": parametres.base_order,
-            "qty": bo_qty,
-            "current_price": final_price,
-            "pnl": bo_pnl,
-            "pnl_pct": bo_pnl_pct,
+            "type": "BO_1",  # ✅ Cohérence avec trades fermés
+            "entry_time": position['entry_time'].strftime('%Y-%m-%d %H:%M:%S') if hasattr(position['entry_time'], 'strftime') else str(position['entry_time']),
+            "entry_price": float(position['entry_price']),
+            "size_usd": float(parametres.base_order),
+            "qty": float(bo_qty),
+            "current_price": float(final_price),
+            "pnl": float(bo_pnl),
+            "pnl_pct": float(bo_pnl_pct),
             "is_open": True,
             "is_win": bo_pnl > 0,
         })
         
         # Safety Orders
-        for so_idx, (so_time, so_price) in enumerate(zip(position['so_list'].get('times', []), position['so_list'].get('prices', []))):
-            so_size = parametres.safe_order * (parametres.safe_order_volume_scale ** so_idx)
+        for so_idx, (so_time, so_price) in enumerate(zip(position['so_list'].get('times', []), position['so_list'].get('prices', [])), 1):
+            so_size = parametres.safe_order * (parametres.safe_order_volume_scale ** (so_idx - 1))
             so_qty = so_size / so_price
             so_proceeds = final_price * so_qty
             so_fees = (so_size + so_proceeds) * parametres.commission
@@ -1518,14 +1597,14 @@ def backtest_smartbot_v2_multi_portfolio(
             so_pnl_pct = ((final_price / so_price) - 1) * 100.0
             
             open_individual_positions.append({
-                "type": f"SO_{so_idx + 1}",
-                "entry_time": so_time,
-                "entry_price": so_price,
-                "size_usd": so_size,
-                "qty": so_qty,
-                "current_price": final_price,
-                "pnl": so_pnl,
-                "pnl_pct": so_pnl_pct,
+                "type": f"SO_{so_idx}",  # ✅ Cohérence avec trades fermés
+                "entry_time": so_time.strftime('%Y-%m-%d %H:%M:%S') if hasattr(so_time, 'strftime') else str(so_time),
+                "entry_price": float(so_price),
+                "size_usd": float(so_size),
+                "qty": float(so_qty),
+                "current_price": float(final_price),
+                "pnl": float(so_pnl),
+                "pnl_pct": float(so_pnl_pct),
                 "is_open": True,
                 "is_win": so_pnl > 0,
             })
@@ -1576,6 +1655,7 @@ def backtest_smartbot_v2_multi_portfolio(
                 is_open_mask = df_trades['is_open'].fillna(False).astype(bool)
                 closed_trades = df_trades[~is_open_mask]
             else:
+                is_open_mask = pd.Series([False] * len(df_trades), index=df_trades.index)
                 closed_trades = df_trades
             winning = closed_trades[closed_trades['pnl'] > 0]
             total_so = int(df_trades['so_count'].sum())
@@ -1618,7 +1698,7 @@ def backtest_smartbot_v2_multi_portfolio(
                 'avg_so_per_trade': float(df_trades['so_count'].mean()),
                 'max_so_used': int(df_trades['so_count'].max()) if len(df_trades) > 0 else 0,
                 'individual_positions': individual_positions,  # Garder pour le tableau
-                'open_trades': df_trades[df_trades.get('is_open', False)].to_dict('records') if 'is_open' in df_trades.columns else []
+                'open_trades': df_trades[is_open_mask].to_dict('records')  # Utiliser le masque booléen
             }
             per_asset_stats[asset] = stats
         else:

@@ -60,8 +60,8 @@ import backtester_exact
 importlib.reload(backtester_exact)  # Force reload pour nouvelles signatures
 from backtester_exact import ParametresDCA_SmartBotV2, backtest_smartbot_v2
 
-# Import du fetcher multi-source
-from fetcher import compare_exchanges_on_bases, expand_coin_inputs, EXCHANGES, fetch_ohlcv
+# Import du fetcher - Binance uniquement pour meilleure performance
+from fetcher import fetch_binance_only, expand_coin_inputs, EXCHANGES, fetch_ohlcv
 
 # Pas de duplication d'import future ici
 import sys
@@ -796,13 +796,11 @@ def fetch_multi_source_data(symbols: List[str], start_date: str, end_date: str, 
         # Configuration pour ton fetcher
         lookback_days = (datetime.strptime(end_date, "%Y-%m-%d") - datetime.strptime(start_date, "%Y-%m-%d")).days
         
-        # Utilise ton fetcher pour comparer les exchanges
-        agg_results, detail_results, raw_data = compare_exchanges_on_bases(
-            exchanges=EXCHANGES,
+        # Utilise Binance uniquement (beaucoup plus rapide)
+        agg_results, detail_results, raw_data = fetch_binance_only(
             bases=symbols,
             timeframe=timeframe,
-            lookback_days=lookback_days,
-            selection="best"  # Sélectionne automatiquement la meilleure source
+            lookback_days=lookback_days
         )
         
         # Traitement des résultats pour chaque symbole
@@ -2169,15 +2167,11 @@ def backtest():
             # Conversion du symbole pour le fetcher (BTC-USD -> BTC)
             base_symbol = symbol.split('-')[0] if '-' in symbol else symbol.replace('/USDT', '').replace('/USD', '')
             
-            # Utilisation de votre fetcher avec les meilleurs exchanges
-            exchanges = ["binance", "coinbase", "kraken", "kucoin"]
-            
-            agg, detail, data = compare_exchanges_on_bases(
-                exchanges=exchanges,
+            # Utilisation de Binance uniquement (plus rapide)
+            agg, detail, data = fetch_binance_only(
                 bases=[base_symbol],  # Ex: ["BTC"]
                 timeframe="1d",
-                lookback_days=365,  # 1 an de données
-                selection="best"
+                lookback_days=365  # 1 an de données
             )
             
             # Vérification que les données ont été récupérées
@@ -3665,6 +3659,9 @@ def backtest_smartbot_v2_endpoint():
                 if df.index.tz is None:
                     df.index = df.index.tz_localize('UTC')
                 
+                # ✅ FIX: Supprimer les lignes avec index NaN avant le masque booléen
+                df = df[~df.index.isna()]
+                
                 # Filtrer
                 df = df[(df.index >= filter_start) & (df.index <= filter_end)]
                 
@@ -4071,22 +4068,16 @@ def backtest_smartbot_v2_multi_endpoint():
                 return jsonify({"error": "Aucune donnée récupérée depuis Alpaca pour les stocks demandés"}), 400
         
         # ==============================================
-        # CRYPTO - Multi-sources via compare_exchanges_on_bases
+        # CRYPTO - Binance uniquement (optimisation performance)
         # ==============================================
         else:
-            exchanges_list = ['binance', 'coinbase', 'kraken', 'kucoin', 'okx']
-            if exchange_name.lower() in exchanges_list:
-                exchanges_list = [exchange_name.lower()] + [e for e in exchanges_list if e != exchange_name.lower()]
-            
-            print(f"🔄 Téléchargement des données pour {len(assets)} assets...")
-            agg, detail, fetch_data = compare_exchanges_on_bases(
-                exchanges=exchanges_list,
+            print(f"🔄 Téléchargement des données pour {len(assets)} assets depuis Binance...")
+            agg, detail, fetch_data = fetch_binance_only(
                 bases=assets,
                 timeframe=tf,
                 lookback_days=365,
                 since_ms=since_ms,
-                until_ms=until_ms,
-                selection="best"
+                until_ms=until_ms
             )
         
         if not fetch_data.get("__FINAL__"):
@@ -4131,6 +4122,9 @@ def backtest_smartbot_v2_multi_endpoint():
             
             if df.index.tz is None:
                 df.index = df.index.tz_localize('UTC')
+            
+            # ✅ FIX: Supprimer les lignes avec index NaN avant le masque booléen
+            df = df[~df.index.isna()]
             
             df = df[(df.index >= filter_start) & (df.index <= filter_end)]
             

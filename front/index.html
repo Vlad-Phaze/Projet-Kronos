@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kronos Backtester - Dashboard</title>
+    <title>Kronos Backtester</title>
     <style>
         * {
             margin: 0;
@@ -16,532 +16,191 @@
             background: #0a0e27;
             color: #e0e0e0;
             min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             padding: 20px;
         }
         
         .container {
-            max-width: 1400px;
-            margin: 0 auto;
+            max-width: 1200px;
+            width: 100%;
+            text-align: center;
         }
         
         /* Header */
-        header {
-            background: #1a1f3a;
-            border-radius: 8px;
-            padding: 30px;
-            margin-bottom: 30px;
-            border: 1px solid #2a3f5f;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        .logo-section {
+            margin-bottom: 60px;
         }
         
         .logo-section h1 {
             color: #4fc3f7;
-            font-size: 2.5em;
-            margin-bottom: 5px;
+            font-size: 3.5em;
+            margin-bottom: 15px;
+            text-shadow: 0 0 20px rgba(79, 195, 247, 0.3);
         }
         
         .logo-section .tagline {
             color: #9e9e9e;
-            font-size: 1.1em;
+            font-size: 1.3em;
         }
         
-        .header-actions {
+        /* Navigation Buttons */
+        .nav-buttons {
             display: flex;
-            gap: 15px;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 40px;
         }
         
-        .btn {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 6px;
-            font-size: 16px;
+        .nav-btn {
+            padding: 20px 35px;
+            border: 2px solid transparent;
+            border-radius: 8px;
+            font-size: 18px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.3s ease;
             text-decoration: none;
             display: inline-flex;
+            flex-direction: column;
             align-items: center;
-            gap: 8px;
+            gap: 10px;
+            min-width: 200px;
+            position: relative;
         }
         
-        .btn-primary {
-            background: #4fc3f7;
+        .nav-btn .icon {
+            font-size: 2.5em;
+        }
+        
+        .nav-btn .label {
+            font-size: 1em;
+        }
+        
+        /* Crypto Single */
+        .nav-btn.crypto-single {
+            background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%);
             color: #0a0e27;
         }
         
-        .btn-primary:hover {
-            background: #29b6f6;
-            transform: translateY(-2px);
-        }
-        
-        .btn-secondary {
-            background: #2a3f5f;
-            color: #e0e0e0;
-        }
-        
-        .btn-secondary:hover {
-            background: #3a4f6f;
-        }
-        
-        /* Stats Cards */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .stat-card {
-            background: #1a1f3a;
-            border: 1px solid #2a3f5f;
-            border-radius: 8px;
-            padding: 20px;
-            transition: transform 0.2s;
-        }
-        
-        .stat-card:hover {
-            transform: translateY(-4px);
+        .nav-btn.crypto-single:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(79, 195, 247, 0.4);
             border-color: #4fc3f7;
         }
         
-        .stat-card .label {
-            color: #9e9e9e;
-            font-size: 12px;
-            text-transform: uppercase;
-            margin-bottom: 8px;
+        .nav-btn.crypto-single:active {
+            border-color: #fff;
+            box-shadow: 0 0 30px rgba(79, 195, 247, 0.6),
+                        0 0 10px rgba(255, 255, 255, 0.5) inset;
+            transform: translateY(-3px);
         }
         
-        .stat-card .value {
+        /* Crypto Multi */
+        .nav-btn.crypto-multi {
+            background: linear-gradient(135deg, #2a3f5f 0%, #1a2f4f 100%);
             color: #4fc3f7;
-            font-size: 32px;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-        
-        .stat-card .subtitle {
-            color: #b0b0b0;
-            font-size: 14px;
-        }
-        
-        /* Backtests History */
-        .section-title {
-            color: #4fc3f7;
-            font-size: 1.8em;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #2a3f5f;
-        }
-        
-        .backtests-container {
-            background: #1a1f3a;
-            border: 1px solid #2a3f5f;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .backtest-item {
-            background: #0a0e27;
-            border: 1px solid #2a3f5f;
-            border-radius: 6px;
-            padding: 20px;
-            margin-bottom: 15px;
-            transition: all 0.2s;
-        }
-        
-        .backtest-item:hover {
             border-color: #4fc3f7;
-            transform: translateX(5px);
         }
         
-        .backtest-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: start;
-            margin-bottom: 15px;
+        .nav-btn.crypto-multi:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(79, 195, 247, 0.3);
+            background: linear-gradient(135deg, #3a4f6f 0%, #2a3f5f 100%);
         }
         
-        .backtest-info h3 {
-            color: #4fc3f7;
-            margin-bottom: 5px;
-            font-size: 1.2em;
+        .nav-btn.crypto-multi:active {
+            border-color: #fff;
+            box-shadow: 0 0 30px rgba(79, 195, 247, 0.6),
+                        0 0 10px rgba(79, 195, 247, 0.3) inset;
+            background: linear-gradient(135deg, #4a5f7f 0%, #3a4f6f 100%);
+            transform: translateY(-3px);
         }
         
-        .backtest-meta {
-            color: #9e9e9e;
-            font-size: 0.9em;
+        /* Stock Single */
+        .nav-btn.stock-single {
+            background: linear-gradient(135deg, #2d8659 0%, #1a472a 100%);
+            color: #fff;
         }
         
-        .backtest-status {
-            padding: 6px 12px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 600;
+        .nav-btn.stock-single:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(45, 134, 89, 0.4);
+            border-color: #2d8659;
         }
         
-        .status-success {
-            background: #1a3d1a;
-            color: #4caf50;
-            border: 1px solid #2d5d2d;
+        .nav-btn.stock-single:active {
+            border-color: #fff;
+            box-shadow: 0 0 30px rgba(45, 134, 89, 0.6),
+                        0 0 10px rgba(255, 255, 255, 0.3) inset;
+            transform: translateY(-3px);
         }
         
-        .status-running {
-            background: #1a2a3d;
-            color: #4fc3f7;
-            border: 1px solid #2d4d5d;
+        /* Stock Multi */
+        .nav-btn.stock-multi {
+            background: linear-gradient(135deg, #2d5a3d 0%, #1a3d2a 100%);
+            color: #7cbb8f;
+            border-color: #2d8659;
         }
         
-        .status-error {
-            background: #3d1a1a;
-            color: #f44336;
-            border: 1px solid #5d2a2a;
+        .nav-btn.stock-multi:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(45, 134, 89, 0.3);
+            background: linear-gradient(135deg, #3d6a4d 0%, #2d5a3d 100%);
         }
         
-        .backtest-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
-        }
-        
-        .mini-stat {
-            text-align: center;
-        }
-        
-        .mini-stat .label {
-            color: #9e9e9e;
-            font-size: 11px;
-            text-transform: uppercase;
-            margin-bottom: 5px;
-        }
-        
-        .mini-stat .value {
-            color: #e0e0e0;
-            font-size: 18px;
-            font-weight: bold;
-        }
-        
-        .mini-stat.positive .value {
-            color: #4caf50;
-        }
-        
-        .mini-stat.negative .value {
-            color: #f44336;
-        }
-        
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #666;
-        }
-        
-        .empty-state-icon {
-            font-size: 64px;
-            margin-bottom: 20px;
-            opacity: 0.3;
-        }
-        
-        .empty-state h3 {
-            color: #9e9e9e;
-            margin-bottom: 10px;
-        }
-        
-        .empty-state p {
-            color: #666;
-            margin-bottom: 20px;
-        }
-        
-        /* Loading */
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #9e9e9e;
-        }
-        
-        .spinner {
-            border: 3px solid #2a3f5f;
-            border-top: 3px solid #4fc3f7;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .nav-btn.stock-multi:active {
+            border-color: #fff;
+            box-shadow: 0 0 30px rgba(45, 134, 89, 0.6),
+                        0 0 10px rgba(45, 134, 89, 0.3) inset;
+            background: linear-gradient(135deg, #4d7a5d 0%, #3d6a4d 100%);
+            transform: translateY(-3px);
         }
         
         /* Footer */
         footer {
+            position: fixed;
+            bottom: 20px;
             text-align: center;
-            padding: 20px;
             color: #666;
-            margin-top: 40px;
+            font-size: 0.9em;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <!-- Header -->
-        <header>
-            <div class="logo-section">
-                <h1>KRONOS BACKTESTER</h1>
-                <p class="tagline">Plateforme de backtesting SmartBot V2 - SO Multiplicator Method</p>
-            </div>
-            <div class="header-actions">
-                <a href="configure_smartbot.html" class="btn btn-primary">
-                    � Crypto Single
-                </a>
-                <a href="run_multi_smartbot.html" class="btn btn-secondary">
-                    📊 Crypto Multi
-                </a>
-                <a href="configure_smartbot_stocks.html" class="btn btn-primary" style="background: #1a472a;">
-                    📈 Stock Single
-                </a>
-                <a href="run_multi_smartbot_stocks.html" class="btn btn-secondary" style="background: #2d5a3d; border: 1px solid #1a472a;">
-                    📊 Stocks Multi
-                </a>
-            </div>
-        </header>
-        
-        <!-- Stats Overview -->
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="label">Total Backtests</div>
-                <div class="value" id="totalBacktests">-</div>
-                <div class="subtitle">Tous les temps</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Configurations Testées</div>
-                <div class="value" id="totalStrategies">-</div>
-                <div class="subtitle">SmartBot V2</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Meilleur Retour</div>
-                <div class="value" id="bestReturn">-</div>
-                <div class="subtitle">Performance max</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Dernière Exécution</div>
-                <div class="value" id="lastRun" style="font-size: 18px;">-</div>
-                <div class="subtitle">Temps écoulé</div>
-            </div>
+        <div class="logo-section">
+            <h1>KRONOS BACKTESTER</h1>
+            <p class="tagline">Plateforme de backtesting SmartBot V2 - SO Multiplicator Method</p>
         </div>
         
-        <!-- Recent Backtests -->
-        <h2 class="section-title">📜 Historique des Backtests</h2>
-        <div class="backtests-container">
-            <div id="backtestsContent" class="loading">
-                <div class="spinner"></div>
-                <p>Chargement de l'historique...</p>
-            </div>
+        <!-- Navigation Buttons -->
+        <div class="nav-buttons">
+            <a href="configure_smartbot.html" class="nav-btn crypto-single">
+                <span class="icon">🪙</span>
+                <span class="label">Crypto Single</span>
+            </a>
+            <a href="run_multi_smartbot.html" class="nav-btn crypto-multi">
+                <span class="icon">📊</span>
+                <span class="label">Crypto Multi</span>
+            </a>
+            <a href="configure_smartbot_stocks.html" class="nav-btn stock-single">
+                <span class="icon">📈</span>
+                <span class="label">Stock Single</span>
+            </a>
+            <a href="run_multi_smartbot_stocks.html" class="nav-btn stock-multi">
+                <span class="icon">📊</span>
+                <span class="label">Stocks Multi</span>
+            </a>
         </div>
-        
-        <footer>
-            <p>Kronos Backtester v1.0 - Powered by vectorbt & Multi-Exchange Fusion</p>
-        </footer>
     </div>
     
-    <script>
-        // Configuration
-        const API_URL = 'http://localhost:5002';
-        const STORAGE_KEY = 'kronos_backtest_history';
-        
-        // Charger l'historique au démarrage
-        document.addEventListener('DOMContentLoaded', () => {
-            loadBacktestHistory();
-            updateStats();
-        });
-        
-        // Charger l'historique des backtests depuis localStorage
-        function loadBacktestHistory() {
-            const container = document.getElementById('backtestsContent');
-            const history = getBacktestHistory();
-            
-            if (history.length === 0) {
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📊</div>
-                        <h3>Aucun backtest pour le moment</h3>
-                        <p>Configurez votre stratégie SmartBot V2 et lancez votre premier backtest !</p>
-                        <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px; flex-wrap: wrap;">
-                            <a href="configure_smartbot.html" class="btn btn-primary">
-                                🪙 Crypto Single
-                            </a>
-                            <a href="run_multi_smartbot.html" class="btn btn-secondary">
-                                📊 Crypto Multi
-                            </a>
-                            <a href="configure_smartbot_stocks.html" class="btn btn-primary" style="background: #1a472a;">
-                                📈 Stock Single
-                            </a>
-                            <a href="run_multi_smartbot_stocks.html" class="btn btn-secondary" style="background: #2d5a3d; border: 1px solid #1a472a;">
-                                📊 Stocks Multi
-                            </a>
-                        </div>
-                    </div>
-                `;
-                return;
-            }
-            
-            // Trier par date (plus récent d'abord)
-            history.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            
-            // Afficher les 10 derniers
-            const recentHistory = history.slice(0, 10);
-            
-            container.innerHTML = recentHistory.map(backtest => createBacktestCard(backtest)).join('');
-        }
-        
-        // Créer une carte de backtest
-        function createBacktestCard(backtest) {
-            const statusClass = backtest.status === 'success' ? 'status-success' : 
-                               backtest.status === 'running' ? 'status-running' : 'status-error';
-            const statusText = backtest.status === 'success' ? '✓ Terminé' : 
-                              backtest.status === 'running' ? '⏳ En cours' : '✗ Erreur';
-            
-            const timestamp = new Date(backtest.timestamp);
-            const timeAgo = getTimeAgo(timestamp);
-            
-            let statsHTML = '';
-            if (backtest.results && backtest.status === 'success') {
-                const totalReturn = backtest.results.combined_stats?.total_return_pct || 0;
-                const maxDD = backtest.results.combined_stats?.max_drawdown_pct || 0;
-                const numAssets = backtest.results.combined_stats?.num_assets || 0;
-                
-                // Calculer moyenne des trades
-                let totalTrades = 0;
-                let totalWinRate = 0;
-                let count = 0;
-                
-                if (backtest.results.per_asset_stats) {
-                    Object.values(backtest.results.per_asset_stats).forEach(stats => {
-                        totalTrades += stats.total_trades || 0;
-                        totalWinRate += stats.win_rate_pct || 0;
-                        count++;
-                    });
-                }
-                
-                const avgWinRate = count > 0 ? totalWinRate / count : 0;
-                
-                statsHTML = `
-                    <div class="backtest-stats">
-                        <div class="mini-stat ${totalReturn >= 0 ? 'positive' : 'negative'}">
-                            <div class="label">Rendement</div>
-                            <div class="value">${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(2)}%</div>
-                        </div>
-                        <div class="mini-stat negative">
-                            <div class="label">Max DD</div>
-                            <div class="value">${maxDD.toFixed(2)}%</div>
-                        </div>
-                        <div class="mini-stat">
-                            <div class="label">Assets</div>
-                            <div class="value">${numAssets}</div>
-                        </div>
-                        <div class="mini-stat">
-                            <div class="label">Trades</div>
-                            <div class="value">${totalTrades}</div>
-                        </div>
-                        <div class="mini-stat ${avgWinRate >= 50 ? 'positive' : ''}">
-                            <div class="label">Win Rate</div>
-                            <div class="value">${avgWinRate.toFixed(1)}%</div>
-                        </div>
-                    </div>
-                `;
-            } else if (backtest.status === 'error') {
-                statsHTML = `
-                    <div style="color: #f44336; margin-top: 10px; padding: 10px; background: #3d1a1a; border-radius: 4px;">
-                        ❌ ${backtest.error || 'Erreur inconnue'}
-                    </div>
-                `;
-            }
-            
-            return `
-                <div class="backtest-item">
-                    <div class="backtest-header">
-                        <div class="backtest-info">
-                            <h3>${backtest.strategy_name || 'Strategy'}</h3>
-                            <div class="backtest-meta">
-                                📅 ${timestamp.toLocaleDateString('fr-FR')} à ${timestamp.toLocaleTimeString('fr-FR')} • 
-                                🪙 ${backtest.bases || 'BTC'} • 
-                                🏦 ${backtest.exchange || 'Multi-exchange'} • 
-                                ⏱️ ${timeAgo}
-                            </div>
-                        </div>
-                        <div class="backtest-status ${statusClass}">
-                            ${statusText}
-                        </div>
-                    </div>
-                    ${statsHTML}
-                </div>
-            `;
-        }
-        
-        // Mettre à jour les statistiques globales
-        function updateStats() {
-            const history = getBacktestHistory();
-            const successfulBacktests = history.filter(b => b.status === 'success');
-            
-            // Total backtests
-            document.getElementById('totalBacktests').textContent = history.length;
-            
-            // Stratégies uniques
-            const uniqueStrategies = new Set(history.map(b => b.strategy_name));
-            document.getElementById('totalStrategies').textContent = uniqueStrategies.size;
-            
-            // Meilleur retour
-            let bestReturn = null;
-            successfulBacktests.forEach(backtest => {
-                if (backtest.results?.combined_stats?.total_return_pct) {
-                    const ret = backtest.results.combined_stats.total_return_pct;
-                    if (bestReturn === null || ret > bestReturn) {
-                        bestReturn = ret;
-                    }
-                }
-            });
-            document.getElementById('bestReturn').textContent = 
-                bestReturn !== null ? `+${bestReturn.toFixed(2)}%` : '-';
-            
-            // Dernière exécution
-            if (history.length > 0) {
-                const latest = history.sort((a, b) => 
-                    new Date(b.timestamp) - new Date(a.timestamp)
-                )[0];
-                document.getElementById('lastRun').textContent = 
-                    getTimeAgo(new Date(latest.timestamp));
-            }
-        }
-        
-        // Récupérer l'historique depuis localStorage
-        function getBacktestHistory() {
-            try {
-                const data = localStorage.getItem(STORAGE_KEY);
-                return data ? JSON.parse(data) : [];
-            } catch (e) {
-                console.error('Erreur lors du chargement de l\'historique:', e);
-                return [];
-            }
-        }
-        
-        // Calculer le temps écoulé
-        function getTimeAgo(date) {
-            const seconds = Math.floor((new Date() - date) / 1000);
-            
-            if (seconds < 60) return 'À l\'instant';
-            if (seconds < 3600) return `Il y a ${Math.floor(seconds / 60)} min`;
-            if (seconds < 86400) return `Il y a ${Math.floor(seconds / 3600)}h`;
-            if (seconds < 604800) return `Il y a ${Math.floor(seconds / 86400)}j`;
-            return date.toLocaleDateString('fr-FR');
-        }
-        
-        // Rafraîchir toutes les 30 secondes
-        setInterval(() => {
-            loadBacktestHistory();
-            updateStats();
-        }, 30000);
-    </script>
+    <footer>
+        <p>Kronos Backtester v2.0 - Powered by Binance & yfinance</p>
+    </footer>
 </body>
 </html>

@@ -57,23 +57,73 @@
         }
         
         .nav-links {
-            margin-top: 15px;
-            padding-top: 15px;
+            margin-top: 20px;
+            padding-top: 20px;
             border-top: 1px solid #2d5a3d;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
         }
         
-        .nav-links a {
-            color: #ffffff;
+        .nav-btn {
+            padding: 10px 20px;
+            border: 2px solid transparent;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
             text-decoration: none;
-            margin-right: 30px;
-            font-size: 0.85em;
-            font-weight: 500;
-            letter-spacing: 0.3px;
-            transition: opacity 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
         
-        .nav-links a:hover {
-            opacity: 0.7;
+        .nav-btn.crypto-single {
+            background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%);
+            color: #000;
+        }
+        
+        .nav-btn.crypto-single:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.4);
+        }
+        
+        .nav-btn.crypto-multi {
+            background: linear-gradient(135deg, #2a3f5f 0%, #1a2f4f 100%);
+            color: #4fc3f7;
+            border-color: #4fc3f7;
+        }
+        
+        .nav-btn.crypto-multi:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.3);
+        }
+        
+        .nav-btn.stock-single {
+            background: linear-gradient(135deg, #2d8659 0%, #1a472a 100%);
+            color: #fff;
+        }
+        
+        .nav-btn.stock-single:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(45, 134, 89, 0.4);
+        }
+        
+        .nav-btn.stock-single.active {
+            border-color: #fff;
+            box-shadow: 0 0 15px rgba(45, 134, 89, 0.6);
+        }
+        
+        .nav-btn.stock-multi {
+            background: linear-gradient(135deg, #2d5a3d 0%, #1a3d2a 100%);
+            color: #7cbb8f;
+            border-color: #2d8659;
+        }
+        
+        .nav-btn.stock-multi:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(45, 134, 89, 0.3);
         }
         
         .sections-container {
@@ -402,10 +452,11 @@
             <h1>SmartBot V2 - US Stocks</h1>
             <p class="subtitle">Advanced DCA Strategy for US Stock Market (Powered by Alpaca)</p>
             <div class="nav-links">
-                <a href="index.html">Dashboard</a>
-                <a href="configure_smartbot.html">Crypto Single</a>
-                <a href="run_multi_smartbot.html">Crypto Multi</a>
-                <a href="run_multi_smartbot_stocks.html">Stocks Multi</a>
+                <a href="index.html" class="nav-btn" style="background: #2d5a3d; color: #7cbb8f; border-color: #2d8659;">🏠 Home</a>
+                <a href="configure_smartbot.html" class="nav-btn crypto-single">🪙 Crypto Single</a>
+                <a href="run_multi_smartbot.html" class="nav-btn crypto-multi">📊 Crypto Multi</a>
+                <a href="configure_smartbot_stocks.html" class="nav-btn stock-single active">📈 Stock Single</a>
+                <a href="run_multi_smartbot_stocks.html" class="nav-btn stock-multi">📊 Stocks Multi</a>
             </div>
         </header>
 

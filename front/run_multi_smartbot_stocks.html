@@ -53,23 +53,73 @@
         }
         
         .nav-links {
-            margin-top: 15px;
-            padding-top: 15px;
+            margin-top: 20px;
+            padding-top: 20px;
             border-top: 1px solid #2d5a3d;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
         }
         
-        .nav-links a {
-            color: #ffffff;
+        .nav-btn {
+            padding: 10px 20px;
+            border: 2px solid transparent;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
             text-decoration: none;
-            margin-right: 30px;
-            font-size: 0.85em;
-            font-weight: 500;
-            letter-spacing: 0.3px;
-            transition: opacity 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
         
-        .nav-links a:hover {
-            opacity: 0.7;
+        .nav-btn.crypto-single {
+            background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%);
+            color: #000;
+        }
+        
+        .nav-btn.crypto-single:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.4);
+        }
+        
+        .nav-btn.crypto-multi {
+            background: linear-gradient(135deg, #2a3f5f 0%, #1a2f4f 100%);
+            color: #4fc3f7;
+            border-color: #4fc3f7;
+        }
+        
+        .nav-btn.crypto-multi:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.3);
+        }
+        
+        .nav-btn.stock-single {
+            background: linear-gradient(135deg, #2d8659 0%, #1a472a 100%);
+            color: #fff;
+        }
+        
+        .nav-btn.stock-single:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(45, 134, 89, 0.4);
+        }
+        
+        .nav-btn.stock-multi {
+            background: linear-gradient(135deg, #2d5a3d 0%, #1a3d2a 100%);
+            color: #7cbb8f;
+            border-color: #2d8659;
+        }
+        
+        .nav-btn.stock-multi:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(45, 134, 89, 0.3);
+        }
+        
+        .nav-btn.stock-multi.active {
+            border-color: #fff;
+            box-shadow: 0 0 15px rgba(45, 134, 89, 0.6);
         }
         
         .sections-container {
@@ -346,10 +396,11 @@
             <h1>SmartBot V2 - Multi-Stock Portfolio (US)</h1>
             <p class="subtitle">Advanced DCA Strategy for US Stock Market with Portfolio Management (Powered by Alpaca)</p>
             <div class="nav-links">
-                <a href="index.html">Dashboard</a>
-                <a href="configure_smartbot.html">Crypto Single</a>
-                <a href="run_multi_smartbot.html">Crypto Multi</a>
-                <a href="configure_smartbot_stocks.html">Stocks Single</a>
+                <a href="index.html" class="nav-btn" style="background: #2d5a3d; color: #7cbb8f; border-color: #2d8659;">🏠 Home</a>
+                <a href="configure_smartbot.html" class="nav-btn crypto-single">🪙 Crypto Single</a>
+                <a href="run_multi_smartbot.html" class="nav-btn crypto-multi">📊 Crypto Multi</a>
+                <a href="configure_smartbot_stocks.html" class="nav-btn stock-single">📈 Stock Single</a>
+                <a href="run_multi_smartbot_stocks.html" class="nav-btn stock-multi active">📊 Stocks Multi</a>
             </div>
         </header>
 
@@ -797,10 +848,19 @@
             Object.entries(perAsset).forEach(([asset, astats]) => {
                 const chartId = `price-chart-${asset}`;
                 const tableId = `trades-table-${asset}`;
-                // Calculer le nombre réel de positions pour cet asset
-                const assetPositions = astats.individual_positions ? astats.individual_positions.length : 0;
+                
+                // ✅ Recalculer les stats à partir de individual_positions pour cohérence
+                const positions = astats.individual_positions || [];
+                const assetPositions = positions.length;
+                const assetWinningPos = positions.filter(p => p.is_win).length;
+                const assetWinRate = assetPositions > 0 ? (assetWinningPos / assetPositions * 100) : 0;
+                const assetPnl = positions.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0);
+                const assetSoPlaced = positions.filter(p => String(p.type || '').startsWith('SO_')).length;
+                const assetDeals = positions.filter(p => String(p.type || '').startsWith('BO_')).length;
+                const assetAvgSo = assetDeals > 0 ? (assetSoPlaced / assetDeals) : 0;
+                
                 perAssetHTML += `
-                    <div style="background: #f5f5f5; border-left: 4px solid ${astats.total_pnl >= 0 ? '#000000' : '#999999'}">
+                    <div style="background: #f5f5f5; border-left: 4px solid ${assetPnl >= 0 ? '#000000' : '#999999'}">
                         <div style="padding: 15px; cursor: pointer; user-select: none;" onclick="toggleChart('${chartId}', 'arrow-${asset}')">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <div style="font-weight: 700; font-size: 1.1em;">${asset}</div>
@@ -808,11 +868,11 @@
                             </div>
                             <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.9em; margin-top: 10px;">
                                 <div><strong>Trades:</strong> ${assetPositions}</div>
-                                <div title="Méthode TradingView: chaque position (BO, SO1, SO2...) compte séparément"><strong>Win Rate (TV):</strong> ${(astats.win_rate_tradingview || astats.win_rate || 0).toFixed(1)}%</div>
-                                <div><strong>PnL:</strong> $${astats.total_pnl?.toFixed(2) || 0}</div>
-                                <div><strong>SO Placed:</strong> ${astats.total_so_placed || 0}</div>
-                                <div><strong>Avg SO/Deal:</strong> ${astats.avg_so_per_trade?.toFixed(1) || 0}</div>
-                                ${astats.open_trades_at_end > 0 ? `<div style="color: #999;"><strong>Open at End:</strong> ${astats.open_trades_at_end}</div>` : ''}
+                                <div title="Méthode TradingView: chaque position (BO, SO1, SO2...) compte séparément"><strong>Win Rate (TV):</strong> ${assetWinRate.toFixed(1)}%</div>
+                                <div><strong>PnL:</strong> $${assetPnl.toFixed(2)}</div>
+                                <div><strong>SO Placed:</strong> ${assetSoPlaced}</div>
+                                <div><strong>Avg SO/Deal:</strong> ${assetAvgSo.toFixed(1)}</div>
+                                ${astats.open_trades && astats.open_trades.length > 0 ? `<div style="color: #999;"><strong>Open at End:</strong> ${astats.open_trades.length}</div>` : ''}
                             </div>
                         </div>
                         <div id="${chartId}" style="display: none; padding: 15px; background: white; border-top: 1px solid #ddd;">
@@ -938,6 +998,14 @@
                             <thead>
                                 <tr style="background: #f5f5f5; border-bottom: 2px solid #000000;">
                                     <th style="padding: 10px 8px; text-align: left; font-weight: 600;">Type</th>
+                                    <th style="padding: 10px 8px; text-align: left; font-weight: 600;">Entry Date</th>
+                                    <th style="padding: 10px 8px; text-align: left; font-weight: 600;">Exit Date</th>
+                                    <th style="padding: 10px 8px; text-align: right; font-weight: 600;">Entry</th>
+                                    <th style="padding: 10px 8px; text-align: right; font-weight: 600;">Exit</th>
+                                    <th style="padding: 10px 8px; text-align: right; font-weight: 600;">Qty</th>
+                                    <th style="padding: 10px 8px; text-align: right; font-weight: 600;">Size ($)</th>
+                                    <th style="padding: 10px 8px; text-align: right; font-weight: 600;">P&L ($)</th>
+                                    <th style="padding: 10px 8px; text-align: right; font-weight: 600;">P&L (%)</th>
                                     <th style="padding: 10px 8px; text-align: center; font-weight: 600;">Status</th>
                                 </tr>
                             </thead>
@@ -945,16 +1013,37 @@
             `;
             
             positions.forEach((pos, idx) => {
-                const isWin = pos.is_win;
-                const statusColor = isWin ? '#10b981' : '#ef4444';
-                const statusText = isWin ? 'WIN' : 'LOSS';
+                const pnl = Number(pos.pnl || 0);
+                const pnlPct = Number(pos.pnl_pct || 0);
+                const entryPrice = Number(pos.entry_price || 0);
+                const exitPrice = pos.is_open ? Number(pos.current_price || 0) : Number(pos.exit_price || 0);
+                const qty = Number(pos.qty || 0);
+                const sizeUsd = Number(pos.size_usd || 0);
+                const isOpen = pos.is_open || false;
+                const isWin = pos.is_win || pnl > 0;
+                const statusColor = isOpen ? '#1f77b4' : (isWin ? '#10b981' : '#ef4444');
+                const statusText = isOpen ? 'OPEN' : (isWin ? 'WIN' : 'LOSS');
                 const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
+                const entryTime = pos.entry_time || '-';
+                const exitTime = isOpen ? 'En cours' : (pos.exit_time || '-');
                 
                 html += `
                     <tr style="background: ${rowBg}; border-bottom: 1px solid #e0e0e0;">
-                        <td style="padding: 8px; font-weight: 500;">${pos.type}</td>
-                        <td style="padding: 8px; text-align: center;">
-                            <span style="background: ${statusColor}; color: white; padding: 3px 8px; border-radius: 3px; font-weight: 600; font-size: 10px;">
+                        <td style="padding: 10px 8px; font-weight: 500;">${pos.type}</td>
+                        <td style="padding: 10px 8px; font-family: monospace; font-size: 11px;">${entryTime}</td>
+                        <td style="padding: 10px 8px; font-family: monospace; font-size: 11px;">${exitTime}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${entryPrice.toFixed(2)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${exitPrice.toFixed(2)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">${qty.toFixed(6)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace;">$${sizeUsd.toFixed(2)}</td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace; color: ${statusColor}; font-weight: 600;">
+                            ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}
+                        </td>
+                        <td style="padding: 10px 8px; text-align: right; font-family: monospace; color: ${statusColor}; font-weight: 600;">
+                            ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%
+                        </td>
+                        <td style="padding: 10px 8px; text-align: center;">
+                            <span style="background: ${statusColor}; color: white; padding: 4px 10px; border-radius: 3px; font-weight: 600; font-size: 11px;">
                                 ${statusText}
                             </span>
                         </td>

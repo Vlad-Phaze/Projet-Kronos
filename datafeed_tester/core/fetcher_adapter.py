@@ -9,7 +9,7 @@ import pandas as pd
 from datafeed_tester.fetcher import (
     EXCHANGES,
     expand_coin_inputs,
-    compare_exchanges_on_bases,
+    fetch_binance_only,
 )
 
 def fetch_market_data(
@@ -44,17 +44,14 @@ def fetch_market_data(
     if use_group_expansion:
         bases = expand_coin_inputs(bases, errors=front_errors)
 
-    # 2) Appel à ton cœur de fetch
-    agg, detail, data = compare_exchanges_on_bases(
-        exchanges,
+    # 2) Appel simplifié à Binance uniquement (optimisation performance)
+    #    Note: les paramètres exchanges, selection, fixed_exchange, allowed_exchanges
+    #    et include_derivatives sont ignorés avec fetch_binance_only
+    agg, detail, data = fetch_binance_only(
         bases,
         timeframe,
         lookback_days,
         preferred_quotes=preferred_quotes,
-        allowed_exchanges=allowed_exchanges,
-        selection=selection,
-        fixed_exchange=fixed_exchange,
-        include_derivatives=include_derivatives,
     )
 
     # 3) Extraction des sorties finales
