@@ -7,7 +7,10 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Kronos - SmartBot V2 US Stocks</title>
+    <title>Kronos Capital - Backtesteur</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
         * {
@@ -17,9 +20,9 @@
         }
         
         body {
-            font-family: 'Helvetica Neue', Arial, sans-serif;
-            background: #ffffff;
-            color: #000000;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #edeae4;
+            color: #1a1a1a;
             min-height: 100vh;
             padding: 0;
             line-height: 1.6;
@@ -29,37 +32,46 @@
         .container {
             max-width: 100%;
             margin: 0 auto;
-            background: #ffffff;
+            background: #edeae4;
             padding: 0;
         }
         
         header {
-            background: #1a472a;
-            color: #ffffff;
-            padding: 20px 40px;
-            border-bottom: 1px solid #1a472a;
+            background: #edeae4;
+            color: #1a1a1a;
+            padding: 24px 40px;
+            border-bottom: none;
+            box-shadow: none;
         }
         
         h1 {
-            color: #ffffff;
+            color: #1a1a1a;
             margin-bottom: 8px;
-            font-size: 2.2em;
+            font-size: 2em;
             font-weight: 700;
-            letter-spacing: -0.5px;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        h1 img {
+            height: 36px;
+            width: auto;
         }
         
         .subtitle {
-            color: #c2e7d0;
+            color: #888888;
             margin-bottom: 15px;
             font-size: 0.95em;
             font-weight: 400;
-            letter-spacing: 0.3px;
+            letter-spacing: 0;
         }
         
         .nav-links {
             margin-top: 20px;
             padding-top: 20px;
-            border-top: 1px solid #2d5a3d;
+            border-top: none;
             display: flex;
             gap: 12px;
             flex-wrap: wrap;
@@ -67,119 +79,79 @@
         
         .nav-btn {
             padding: 10px 20px;
-            border: 2px solid transparent;
-            border-radius: 6px;
+            border: 1px solid #ddd9d3;
+            border-radius: 8px;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             text-decoration: none;
             display: inline-flex;
             align-items: center;
             gap: 6px;
+            background: #ffffff;
+            color: #1a1a1a;
         }
         
-        .nav-btn.crypto-single {
-            background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%);
-            color: #000;
-        }
-        
-        .nav-btn.crypto-single:hover {
+        .nav-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.4);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            border-color: #1a1a1a;
         }
         
-        .nav-btn.crypto-multi {
-            background: linear-gradient(135deg, #2a3f5f 0%, #1a2f4f 100%);
-            color: #4fc3f7;
-            border-color: #4fc3f7;
-        }
-        
-        .nav-btn.crypto-multi:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.3);
-        }
-        
-        .nav-btn.stock-single {
-            background: linear-gradient(135deg, #2d8659 0%, #1a472a 100%);
-            color: #fff;
-        }
-        
-        .nav-btn.stock-single:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(45, 134, 89, 0.4);
-        }
-        
-        .nav-btn.stock-single.active {
-            border-color: #fff;
-            box-shadow: 0 0 15px rgba(45, 134, 89, 0.6);
-        }
-        
-        .nav-btn.stock-multi {
-            background: linear-gradient(135deg, #2d5a3d 0%, #1a3d2a 100%);
-            color: #7cbb8f;
-            border-color: #2d8659;
-        }
-        
-        .nav-btn.stock-multi:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(45, 134, 89, 0.3);
+        .nav-btn.active {
+            background: #1a1a1a;
+            color: #ffffff;
+            border-color: #1a1a1a;
         }
         
         .sections-container {
             display: flex;
-            flex-direction: column;
-            padding: 20px;
-            background: #ffffff;
-        }
-        
-        .sections-headers {
-            display: flex;
-            gap: 0;
-            align-items: flex-start;
+            flex-direction: row;
+            padding: 40px 20px;
+            background: #edeae4;
+            gap: 20px;
         }
         
         .section {
-            background: #1a472a;
+            background: #ffffff;
             flex: 1;
-            min-width: 0;
             display: flex;
             flex-direction: column;
-            border-right: 1px solid #2d5a3d;
-            align-self: flex-start;
-        }
-        
-        .section:last-child {
-            border-right: none;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #ddd9d3;
         }
         
         .accordion-header {
             color: #ffffff;
-            font-size: 0.75em;
-            padding: 12px 10px;
+            font-size: 0.85em;
+            padding: 16px 12px;
             font-weight: 700;
-            letter-spacing: 0.3px;
+            letter-spacing: -0.01em;
             cursor: pointer;
             user-select: none;
             display: flex;
-            flex-direction: column;
             justify-content: center;
             align-items: center;
-            transition: background 0.2s;
+            transition: all 0.2s;
+            background: #1a1a1a;
             text-align: center;
-            white-space: nowrap;
-            flex-shrink: 0;
+            position: relative;
         }
         
         .accordion-header.active {
-            background: #234f35;
+            background: #1a1a1a;
+            color: #ffffff;
         }
         
         .accordion-icon {
             font-size: 0.7em;
             transition: transform 0.3s;
-            color: #ffffff;
+            color: inherit;
             margin-top: 3px;
+            position: absolute;
+            right: 12px;
         }
         
         .accordion-header.active .accordion-icon {
@@ -188,8 +160,7 @@
         
         .accordion-content {
             display: none;
-            background: #1a472a;
-            border-top: 1px solid #2d5a3d;
+            background: #ffffff;
         }
         
         .accordion-content.active {
@@ -209,7 +180,7 @@
         }
         
         .accordion-body {
-            padding: 15px 10px;
+            padding: 20px 15px;
         }
         
         .form-grid {
@@ -225,14 +196,14 @@
         label {
             display: block;
             margin-bottom: 5px;
-            color: #ffffff;
+            color: #1a1a1a;
             font-size: 0.75em;
             font-weight: 600;
-            letter-spacing: 0.3px;
+            letter-spacing: 0;
         }
         
         .label-help {
-            color: #88b399;
+            color: #999;
             font-size: 0.75em;
             display: block;
             margin-top: 3px;
@@ -246,85 +217,90 @@
         input[type="date"],
         select {
             width: 100%;
-            padding: 8px 10px;
-            background: #ffffff;
-            border: 1px solid #cccccc;
-            border-radius: 0;
-            color: #000000;
+            padding: 8px 12px;
+            background: #f8f8f8;
+            border: none;
+            border-radius: 6px;
+            color: #1a1a1a;
             font-size: 13px;
-            font-family: 'Helvetica Neue', Arial, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             transition: all 0.2s;
         }
         
         input:focus,
         select:focus {
             outline: none;
-            border-color: #1a472a;
-            box-shadow: inset 0 0 0 1px #1a472a;
+            background: #f0f0f0;
+            box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.05);
         }
         
         .btn {
-            padding: 14px 28px;
+            padding: 14px 32px;
             border: none;
-            border-radius: 0;
+            border-radius: 8px;
             font-size: 14px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
+            font-weight: 600;
+            letter-spacing: 0;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             display: inline-block;
             min-width: 200px;
         }
         
         .button-container {
-            padding: 20px;
+            padding: 24px;
             display: flex;
-            gap: 10px;
+            gap: 12px;
             justify-content: center;
-            background: #ffffff;
+            background: #edeae4;
+            border-top: none;
         }
         
         .btn-primary {
-            background: #1a472a;
+            background: #1a1a1a;
             color: #ffffff;
-            border: 2px solid #1a472a;
+            border: 1px solid #1a1a1a;
         }
         
         .btn-primary:hover {
-            background: #234f35;
-            border-color: #234f35;
+            background: #333;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
         
         .btn-secondary {
             background: #ffffff;
-            color: #1a472a;
-            border: 2px solid #1a472a;
+            color: #1a1a1a;
+            border: none;
         }
         
         .btn-secondary:hover {
             background: #f5f5f5;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
         }
         
         .info-box {
-            background: #ffffff;
-            border-left: 4px solid #1a472a;
+            background: #f8f9fa;
+            border-left: 4px solid #1a1a1a;
             padding: 20px;
             margin: 20px 40px;
-            color: #333333;
+            color: #888888;
             font-size: 0.9em;
             line-height: 1.7;
+            border-radius: 0 8px 8px 0;
         }
         
         .info-box strong {
-            color: #1a472a;
+            color: #1a1a1a;
             font-weight: 700;
         }
         
         .loading {
             display: none;
-            color: #1a472a;
+            color: #1a1a1a;
             text-align: center;
-            padding: 40px;
+            padding: 60px 40px;
             font-size: 1.1em;
             font-weight: 600;
         }
@@ -337,7 +313,7 @@
             display: none;
             margin: 0;
             padding: 0;
-            background: #ffffff;
+            background: #edeae4;
             width: 100%;
         }
         
@@ -346,46 +322,52 @@
         }
         
         .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 1px;
-            background: #2d5a3d;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 16px;
+            background: #edeae4;
             border: none;
-            margin: 0 0 20px 0;
+            margin: 0 0 30px 0;
+            padding: 24px;
         }
         
         .stat-card {
-            background: #1a472a;
-            padding: 20px;
-            text-align: left;
-            border: none;
+            background: #ffffff;
+            padding: 24px;
+            text-align: center;
+            border: 1px solid #ddd9d3;
+            border-radius: 8px;
+            min-width: fit-content;
+            flex: 0 1 auto;
         }
         
         .stat-label {
-            color: #88b399;
+            color: #888888;
             font-size: 0.75em;
             margin-bottom: 8px;
             font-weight: 600;
-            letter-spacing: 0.3px;
+            letter-spacing: 0;
+            text-transform: uppercase;
         }
         
         .stat-value {
-            color: #ffffff;
+            color: #1a1a1a;
             font-size: 1.8em;
             font-weight: 700;
-            letter-spacing: -0.5px;
+            letter-spacing: -0.02em;
         }
         
         .stat-value.positive {
-            color: #ffffff;
+            color: #10b981;
         }
         
         .stat-value.negative {
-            color: #999999;
+            color: #ef4444;
         }
         
         .chart-container {
-            background: #ffffff;
+            background: #edeae4;
             border: none;
             padding: 0;
             margin: 0 auto;
@@ -395,11 +377,11 @@
             justify-content: center;
         }
         
-        .chart-container h3 {
-            color: #1a472a;
+         .chart-container h3 {
+            color: #1a1a1a;
             font-weight: 700;
             margin-bottom: 20px;
-            letter-spacing: 0.3px;
+            letter-spacing: 0;
             font-size: 0.9em;
             border-bottom: none;
             padding-bottom: 10px;
@@ -413,56 +395,59 @@
         .chart-container div {
             margin-top: 0;
             padding: 0;
-            background: #ffffff;
+            background: transparent;
             border-left: none;
             font-size: 0.85em;
             line-height: 1.8;
-            color: #333333;
+            color: #1a1a1a;
         }
         
         .preset-buttons {
             display: flex;
             gap: 1px;
-            background: #e0e0e0;
-            border: 1px solid #e0e0e0;
+            background: #ddd9d3;
+            border: 1px solid #ddd9d3;
         }
         
         .preset-btn {
             flex: 1;
             padding: 12px 20px;
             background: #ffffff;
-            border: none;
-            color: #1a472a;
+            border: 1px solid #d0d0d0;
+            color: #1a1a1a;
             cursor: pointer;
             font-size: 0.85em;
             font-weight: 600;
-            letter-spacing: 0.3px;
+            letter-spacing: 0;
             transition: all 0.2s;
+            border-radius: 6px;
         }
         
         .preset-btn:hover {
-            background: #f5f5f5;
-            color: #1a472a;
+            background: #1a1a1a;
+            color: #ffffff;
+            border-color: #1a1a1a;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>SmartBot V2 - US Stocks</h1>
-            <p class="subtitle">Advanced DCA Strategy for US Stock Market (Powered by Alpaca)</p>
+            <h1>KRONOS CAPITAL BACKTESTEUR</h1>
+            <p class="subtitle">Configuration avancée SmartBot V2 - US Stock Market</p>
             <div class="nav-links">
-                <a href="index.html" class="nav-btn" style="background: #2d5a3d; color: #7cbb8f; border-color: #2d8659;">🏠 Home</a>
-                <a href="configure_smartbot.html" class="nav-btn crypto-single">🪙 Crypto Single</a>
-                <a href="run_multi_smartbot.html" class="nav-btn crypto-multi">📊 Crypto Multi</a>
-                <a href="configure_smartbot_stocks.html" class="nav-btn stock-single active">📈 Stock Single</a>
-                <a href="run_multi_smartbot_stocks.html" class="nav-btn stock-multi">📊 Stocks Multi</a>
+                <a href="index.html" class="nav-btn">Home</a>
+                <a href="configure_smartbot.html" class="nav-btn">Crypto Single</a>
+                <a href="run_multi_smartbot.html" class="nav-btn">Crypto Multi</a>
+                <a href="configure_smartbot_stocks.html" class="nav-btn active">Stock Single</a>
+                <a href="run_multi_smartbot_stocks.html" class="nav-btn">Stocks Multi</a>
             </div>
         </header>
 
         <form id="backtestForm">
             <div class="sections-container">
-                <div class="sections-headers">
                     <!-- Market Data -->
                     <div class="section">
                         <div class="accordion-header active" onclick="toggleAccordion(0)">
@@ -504,11 +489,11 @@
 
                     <!-- Entry Conditions -->
                     <div class="section">
-                        <div class="accordion-header" onclick="toggleAccordion(1)">
+                        <div class="accordion-header active" onclick="toggleAccordion(1)">
                             <span>Entry Conditions</span>
                             <span class="accordion-icon">▼</span>
                         </div>
-                        <div class="accordion-content" data-section="1">
+                        <div class="accordion-content active" data-section="1">
                             <div class="accordion-body">
                                 <div class="form-grid">
                                     <div class="form-group">
@@ -550,11 +535,11 @@
 
                     <!-- Order Management -->
                     <div class="section">
-                        <div class="accordion-header" onclick="toggleAccordion(2)">
+                        <div class="accordion-header active" onclick="toggleAccordion(2)">
                             <span>Order Management</span>
                             <span class="accordion-icon">▼</span>
                         </div>
-                        <div class="accordion-content" data-section="2">
+                        <div class="accordion-content active" data-section="2">
                             <div class="accordion-body">
                                 <div class="form-grid">
                                     <div class="form-group">
@@ -588,11 +573,11 @@
 
                     <!-- Price Deviation -->
                     <div class="section">
-                        <div class="accordion-header" onclick="toggleAccordion(3)">
+                        <div class="accordion-header active" onclick="toggleAccordion(3)">
                             <span>Price Deviation</span>
                             <span class="accordion-icon">▼</span>
                         </div>
-                        <div class="accordion-content" data-section="3">
+                        <div class="accordion-content active" data-section="3">
                             <div class="accordion-body">
                                 <div class="form-grid">
                                     <div class="form-group">
@@ -630,11 +615,11 @@
 
                     <!-- Take Profit -->
                     <div class="section">
-                        <div class="accordion-header" onclick="toggleAccordion(4)">
+                        <div class="accordion-header active" onclick="toggleAccordion(4)">
                             <span>Take Profit</span>
                             <span class="accordion-icon">▼</span>
                         </div>
-                        <div class="accordion-content" data-section="4">
+                        <div class="accordion-content active" data-section="4">
                             <div class="accordion-body">
                                 <div class="form-grid">
                                     <div class="form-group">
@@ -656,7 +641,6 @@
                             </div>
                         </div>
                     </div>
-                </div>
             </div>
 
             <div class="button-container">
@@ -847,11 +831,10 @@
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Win Rate (TradingView)</div>
+                    <div class="stat-label">Win Rate</div>
                     <div class="stat-value ${(stats.win_rate_tradingview || stats.win_rate || 0) >= 50 ? 'positive' : 'negative'}">
                         ${(stats.win_rate_tradingview || stats.win_rate || 0).toFixed(1)}%
                     </div>
-                    <div style="font-size: 0.7em; color: #88b399; margin-top: 5px;" title="Chaque position (BO, SO1, SO2...) compte séparément">Méthode TradingView</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">PnL Total</div>
@@ -904,30 +887,33 @@
                 // Vider complètement le conteneur
                 chartContainer.innerHTML = '';
                 
-                // 1. Créer le conteneur des graphiques (flex, côte à côte)
+                // 1. Créer le conteneur des graphiques (flex, côte à côte) dans une carte avec bords arrondis
+                const chartsCard = document.createElement('div');
+                chartsCard.style.background = '#ffffff';
+                chartsCard.style.borderRadius = '12px';
+                chartsCard.style.padding = '20px';
+                chartsCard.style.maxWidth = '1800px';
+                chartsCard.style.margin = '0 auto 20px auto';
+                
                 const chartsRow = document.createElement('div');
                 chartsRow.style.display = 'flex';
                 chartsRow.style.gap = '20px';
-                chartsRow.style.maxWidth = '1800px';
-                chartsRow.style.margin = '0 auto';
-                chartsRow.style.padding = '20px';
                 
                 // Créer div pour equity chart
                 const equityDiv = document.createElement('div');
                 equityDiv.id = 'equity-chart';
                 equityDiv.style.flex = '1';
-                equityDiv.style.background = '#ffffff';
                 chartsRow.appendChild(equityDiv);
                 
                 // Créer div pour price chart
                 const priceDiv = document.createElement('div');
                 priceDiv.id = 'price-chart';
                 priceDiv.style.flex = '1';
-                priceDiv.style.background = '#ffffff';
                 chartsRow.appendChild(priceDiv);
                 
-                // Ajouter la ligne des graphiques au conteneur principal
-                chartContainer.appendChild(chartsRow);
+                // Ajouter la ligne des graphiques dans la carte
+                chartsCard.appendChild(chartsRow);
+                chartContainer.appendChild(chartsCard);
                 
                 // 2. Créer le conteneur du tableau (pleine largeur, EN DESSOUS)
                 const tableContainer = document.createElement('div');
@@ -957,9 +943,9 @@
                     type: 'scatter',
                     mode: 'lines',
                     name: 'Equity',
-                    line: {color: '#1a472a', width: 2},
+                    line: {color: '#000000', width: 2},
                     fill: 'tozeroy',
-                    fillcolor: 'rgba(26, 71, 42, 0.1)'
+                    fillcolor: 'rgba(0, 0, 0, 0.1)'
                 };
                 const equityTraces = [equityTrace];
 
@@ -980,16 +966,16 @@
                 const equityLayout = {
                     title: {
                         text: 'Equity Curve - SmartBot V2 (US Stocks)',
-                        font: {size: 18, color: '#1a472a', family: 'Arial Black'}
+                        font: {size: 18, color: '#000000', family: 'Arial Black'}
                     },
                     xaxis: {
                         title: 'Date',
-                        titlefont: {size: 12, color: '#1a472a'},
+                        titlefont: {size: 12, color: '#000000'},
                         gridcolor: '#e0e0e0'
                     },
                     yaxis: {
                         title: 'Equity ($)',
-                        titlefont: {size: 12, color: '#1a472a'},
+                        titlefont: {size: 12, color: '#000000'},
                         gridcolor: '#e0e0e0',
                         range: yRange
                     },
@@ -1038,14 +1024,15 @@
             }
             
             let html = `
-                <div style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 4px; overflow: hidden;">
-                    <div style="background: #1a472a; color: #ffffff; padding: 15px; font-weight: bold; font-size: 16px;">
-                        Détail des Positions (Style TradingView)
-                    </div>
-                    <div style="overflow-x: auto;">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                <div style="background: #edeae4; border-radius: 12px; padding: 20px; margin-top: 20px;">
+                    <div style="background: #ffffff; border: 1px solid #ddd9d3; border-radius: 8px; overflow: hidden;">
+                        <div style="background: #000000; color: #ffffff; padding: 15px; font-weight: bold; font-size: 16px;">
+                            Détail des Positions
+                        </div>
+                        <div style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                             <thead>
-                                <tr style="background: #f5f5f5; border-bottom: 2px solid #1a472a;">
+                                <tr style="background: #f5f5f5; border-bottom: 2px solid #000000;">
                                     <th style="padding: 12px 8px; text-align: left; font-weight: 600;">Type</th>
                                     <th style="padding: 12px 8px; text-align: left; font-weight: 600;">Entry Date</th>
                                     <th style="padding: 12px 8px; text-align: left; font-weight: 600;">Exit / Current Date</th>
@@ -1108,6 +1095,7 @@
                         </table>
                     </div>
                 </div>
+            </div>
             `;
             
             tableContainer.innerHTML = html;

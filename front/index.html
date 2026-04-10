@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kronos Backtester</title>
+    <title>Kronos Capital - Backtesteur</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -12,15 +15,16 @@
         }
         
         body {
-            font-family: Arial, sans-serif;
-            background: #0a0e27;
-            color: #e0e0e0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #edeae4;
+            color: #1a1a1a;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            padding: 40px 20px;
+            line-height: 1.6;
         }
         
         .container {
@@ -31,142 +35,113 @@
         
         /* Header */
         .logo-section {
-            margin-bottom: 60px;
+            margin-bottom: 80px;
         }
         
         .logo-section h1 {
-            color: #4fc3f7;
-            font-size: 3.5em;
-            margin-bottom: 15px;
-            text-shadow: 0 0 20px rgba(79, 195, 247, 0.3);
+            color: #1a1a1a;
+            font-size: 2.8em;
+            font-weight: 700;
+            margin-bottom: 12px;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            justify-content: center;
+        }
+        
+        .logo-section h1 img {
+            height: 48px;
+            width: auto;
         }
         
         .logo-section .tagline {
-            color: #9e9e9e;
-            font-size: 1.3em;
+            color: #888888;
+            font-size: 1.05em;
+            font-weight: 400;
+            margin-top: 8px;
         }
         
         /* Navigation Buttons */
         .nav-buttons {
-            display: flex;
-            justify-content: center;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
             gap: 20px;
-            flex-wrap: wrap;
             margin-top: 40px;
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
         }
         
         .nav-btn {
-            padding: 20px 35px;
-            border: 2px solid transparent;
-            border-radius: 8px;
-            font-size: 18px;
+            padding: 32px 24px;
+            border: 1px solid #ddd9d3;
+            border-radius: 12px;
+            font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             text-decoration: none;
-            display: inline-flex;
+            display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 10px;
-            min-width: 200px;
+            gap: 14px;
+            background: #ffffff;
+            color: #1a1a1a;
             position: relative;
+            overflow: hidden;
         }
         
-        .nav-btn .icon {
-            font-size: 2.5em;
+        .nav-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.04) 100%);
+            opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+        
+        .nav-btn:hover::before {
+            opacity: 1;
+        }
+        
+        .nav-btn:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+            border-color: #1a1a1a;
+        }
+        
+        .nav-btn:active {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
         }
         
         .nav-btn .label {
             font-size: 1em;
+            position: relative;
+            z-index: 1;
+            letter-spacing: -0.01em;
         }
         
-        /* Crypto Single */
-        .nav-btn.crypto-single {
-            background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%);
-            color: #0a0e27;
-        }
-        
-        .nav-btn.crypto-single:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(79, 195, 247, 0.4);
-            border-color: #4fc3f7;
-        }
-        
-        .nav-btn.crypto-single:active {
-            border-color: #fff;
-            box-shadow: 0 0 30px rgba(79, 195, 247, 0.6),
-                        0 0 10px rgba(255, 255, 255, 0.5) inset;
-            transform: translateY(-3px);
-        }
-        
-        /* Crypto Multi */
-        .nav-btn.crypto-multi {
-            background: linear-gradient(135deg, #2a3f5f 0%, #1a2f4f 100%);
-            color: #4fc3f7;
-            border-color: #4fc3f7;
-        }
-        
-        .nav-btn.crypto-multi:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(79, 195, 247, 0.3);
-            background: linear-gradient(135deg, #3a4f6f 0%, #2a3f5f 100%);
-        }
-        
-        .nav-btn.crypto-multi:active {
-            border-color: #fff;
-            box-shadow: 0 0 30px rgba(79, 195, 247, 0.6),
-                        0 0 10px rgba(79, 195, 247, 0.3) inset;
-            background: linear-gradient(135deg, #4a5f7f 0%, #3a4f6f 100%);
-            transform: translateY(-3px);
-        }
-        
-        /* Stock Single */
-        .nav-btn.stock-single {
-            background: linear-gradient(135deg, #2d8659 0%, #1a472a 100%);
-            color: #fff;
-        }
-        
-        .nav-btn.stock-single:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(45, 134, 89, 0.4);
-            border-color: #2d8659;
-        }
-        
-        .nav-btn.stock-single:active {
-            border-color: #fff;
-            box-shadow: 0 0 30px rgba(45, 134, 89, 0.6),
-                        0 0 10px rgba(255, 255, 255, 0.3) inset;
-            transform: translateY(-3px);
-        }
-        
-        /* Stock Multi */
-        .nav-btn.stock-multi {
-            background: linear-gradient(135deg, #2d5a3d 0%, #1a3d2a 100%);
-            color: #7cbb8f;
-            border-color: #2d8659;
-        }
-        
-        .nav-btn.stock-multi:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(45, 134, 89, 0.3);
-            background: linear-gradient(135deg, #3d6a4d 0%, #2d5a3d 100%);
-        }
-        
-        .nav-btn.stock-multi:active {
-            border-color: #fff;
-            box-shadow: 0 0 30px rgba(45, 134, 89, 0.6),
-                        0 0 10px rgba(45, 134, 89, 0.3) inset;
-            background: linear-gradient(135deg, #4d7a5d 0%, #3d6a4d 100%);
-            transform: translateY(-3px);
+        .nav-btn .description {
+            font-size: 0.85em;
+            color: #888888;
+            font-weight: 400;
+            position: relative;
+            z-index: 1;
         }
         
         /* Footer */
         footer {
             position: fixed;
-            bottom: 20px;
+            bottom: 30px;
             text-align: center;
-            color: #666;
-            font-size: 0.9em;
+            color: #999;
+            font-size: 0.85em;
+            font-weight: 400;
         }
     </style>
 </head>
@@ -174,33 +149,33 @@
     <div class="container">
         <!-- Header -->
         <div class="logo-section">
-            <h1>KRONOS BACKTESTER</h1>
-            <p class="tagline">Plateforme de backtesting SmartBot V2 - SO Multiplicator Method</p>
+            <h1>KRONOS CAPITAL BACKTESTEUR</h1>
+            <p class="tagline">Plateforme de backtesting professionnelle SmartBot V2</p>
         </div>
         
         <!-- Navigation Buttons -->
         <div class="nav-buttons">
-            <a href="configure_smartbot.html" class="nav-btn crypto-single">
-                <span class="icon">🪙</span>
+            <a href="configure_smartbot.html" class="nav-btn">
                 <span class="label">Crypto Single</span>
+                <span class="description">Configuration individuelle</span>
             </a>
-            <a href="run_multi_smartbot.html" class="nav-btn crypto-multi">
-                <span class="icon">📊</span>
+            <a href="run_multi_smartbot.html" class="nav-btn">
                 <span class="label">Crypto Multi</span>
+                <span class="description">Portfolio multi-actifs</span>
             </a>
-            <a href="configure_smartbot_stocks.html" class="nav-btn stock-single">
-                <span class="icon">📈</span>
+            <a href="configure_smartbot_stocks.html" class="nav-btn">
                 <span class="label">Stock Single</span>
+                <span class="description">Actions individuelles</span>
             </a>
-            <a href="run_multi_smartbot_stocks.html" class="nav-btn stock-multi">
-                <span class="icon">📊</span>
+            <a href="run_multi_smartbot_stocks.html" class="nav-btn">
                 <span class="label">Stocks Multi</span>
+                <span class="description">Portfolio d'actions</span>
             </a>
         </div>
     </div>
     
     <footer>
-        <p>Kronos Backtester v2.0 - Powered by Binance & yfinance</p>
+        <p>© 2026 Kronos Capital – Backtesting professionnel</p>
     </footer>
 </body>
 </html>

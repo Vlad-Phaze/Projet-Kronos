@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kronos - SmartBot V2 Multi-Stock Portfolio (US)</title>
+    <title>Kronos Capital - Backtesteur</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
         * {
@@ -13,9 +16,9 @@
         }
         
         body {
-            font-family: 'Helvetica Neue', Arial, sans-serif;
-            background: #ffffff;
-            color: #000000;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #edeae4;
+            color: #1a1a1a;
             min-height: 100vh;
             padding: 0;
             line-height: 1.6;
@@ -25,37 +28,46 @@
         .container {
             max-width: 100%;
             margin: 0 auto;
-            background: #ffffff;
+            background: #edeae4;
             padding: 0;
         }
         
         header {
-            background: #1a472a;
-            color: #ffffff;
-            padding: 20px 40px;
-            border-bottom: 1px solid #1a472a;
+            background: #edeae4;
+            color: #1a1a1a;
+            padding: 24px 40px;
+            border-bottom: none;
+            box-shadow: none;
         }
         
         h1 {
-            color: #ffffff;
+            color: #1a1a1a;
             margin-bottom: 8px;
-            font-size: 2.2em;
+            font-size: 2em;
             font-weight: 700;
-            letter-spacing: -0.5px;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        h1 img {
+            height: 36px;
+            width: auto;
         }
         
         .subtitle {
-            color: #c2e7d0;
+            color: #888888;
             margin-bottom: 15px;
             font-size: 0.95em;
             font-weight: 400;
-            letter-spacing: 0.3px;
+            letter-spacing: 0;
         }
         
         .nav-links {
             margin-top: 20px;
             padding-top: 20px;
-            border-top: 1px solid #2d5a3d;
+            border-top: none;
             display: flex;
             gap: 12px;
             flex-wrap: wrap;
@@ -63,119 +75,79 @@
         
         .nav-btn {
             padding: 10px 20px;
-            border: 2px solid transparent;
-            border-radius: 6px;
+            border: 1px solid #ddd9d3;
+            border-radius: 8px;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             text-decoration: none;
             display: inline-flex;
             align-items: center;
             gap: 6px;
+            background: #ffffff;
+            color: #1a1a1a;
         }
         
-        .nav-btn.crypto-single {
-            background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%);
-            color: #000;
-        }
-        
-        .nav-btn.crypto-single:hover {
+        .nav-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.4);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            border-color: #1a1a1a;
         }
         
-        .nav-btn.crypto-multi {
-            background: linear-gradient(135deg, #2a3f5f 0%, #1a2f4f 100%);
-            color: #4fc3f7;
-            border-color: #4fc3f7;
-        }
-        
-        .nav-btn.crypto-multi:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.3);
-        }
-        
-        .nav-btn.stock-single {
-            background: linear-gradient(135deg, #2d8659 0%, #1a472a 100%);
-            color: #fff;
-        }
-        
-        .nav-btn.stock-single:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(45, 134, 89, 0.4);
-        }
-        
-        .nav-btn.stock-multi {
-            background: linear-gradient(135deg, #2d5a3d 0%, #1a3d2a 100%);
-            color: #7cbb8f;
-            border-color: #2d8659;
-        }
-        
-        .nav-btn.stock-multi:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(45, 134, 89, 0.3);
-        }
-        
-        .nav-btn.stock-multi.active {
-            border-color: #fff;
-            box-shadow: 0 0 15px rgba(45, 134, 89, 0.6);
+        .nav-btn.active {
+            background: #1a1a1a;
+            color: #ffffff;
+            border-color: #1a1a1a;
         }
         
         .sections-container {
             display: flex;
-            flex-direction: column;
-            padding: 20px;
-            background: #ffffff;
-        }
-        
-        .sections-headers {
-            display: flex;
-            gap: 0;
-            align-items: flex-start;
+            flex-direction: row;
+            padding: 40px 20px;
+            background: #edeae4;
+            gap: 20px;
         }
         
         .section {
-            background: #1a472a;
+            background: #ffffff;
             flex: 1;
-            min-width: 0;
             display: flex;
             flex-direction: column;
-            border-right: 1px solid #2d5a3d;
-            align-self: flex-start;
-        }
-        
-        .section:last-child {
-            border-right: none;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #ddd9d3;
         }
         
         .accordion-header {
             color: #ffffff;
-            font-size: 0.75em;
-            padding: 12px 10px;
+            font-size: 0.85em;
+            padding: 16px 12px;
             font-weight: 700;
-            letter-spacing: 0.3px;
+            letter-spacing: -0.01em;
             cursor: pointer;
             user-select: none;
             display: flex;
-            flex-direction: column;
             justify-content: center;
             align-items: center;
-            transition: background 0.2s;
+            transition: all 0.2s;
+            background: #1a1a1a;
             text-align: center;
-            white-space: nowrap;
-            flex-shrink: 0;
+            position: relative;
         }
         
         .accordion-header.active {
-            background: #234f35;
+            background: #1a1a1a;
+            color: #ffffff;
         }
         
         .accordion-icon {
             font-size: 0.7em;
             transition: transform 0.3s;
-            color: #ffffff;
+            color: inherit;
             margin-top: 3px;
+            position: absolute;
+            right: 12px;
         }
         
         .accordion-header.active .accordion-icon {
@@ -184,8 +156,7 @@
         
         .accordion-content {
             display: none;
-            background: #1a472a;
-            border-top: 1px solid #2d5a3d;
+            background: #ffffff;
         }
         
         .accordion-content.active {
@@ -205,7 +176,7 @@
         }
         
         .accordion-body {
-            padding: 15px 10px;
+            padding: 20px 15px;
         }
         
         .form-grid {
@@ -221,14 +192,14 @@
         label {
             display: block;
             margin-bottom: 5px;
-            color: #ffffff;
+            color: #1a1a1a;
             font-size: 0.75em;
             font-weight: 600;
-            letter-spacing: 0.3px;
+            letter-spacing: 0;
         }
         
         .label-help {
-            color: #88b399;
+            color: #999;
             font-size: 0.75em;
             display: block;
             margin-top: 3px;
@@ -243,13 +214,13 @@
         select,
         textarea {
             width: 100%;
-            padding: 8px 10px;
-            background: #ffffff;
-            border: 1px solid #cccccc;
-            border-radius: 0;
-            color: #000000;
+            padding: 8px 12px;
+            background: #f8f8f8;
+            border: none;
+            border-radius: 6px;
+            color: #1a1a1a;
             font-size: 13px;
-            font-family: 'Helvetica Neue', Arial, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             transition: all 0.2s;
         }
         
@@ -262,46 +233,48 @@
         select:focus,
         textarea:focus {
             outline: none;
-            border-color: #000000;
-            box-shadow: inset 0 0 0 1px #000000;
+            background: #f0f0f0;
+            box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.05);
         }
         
         .btn {
-            padding: 14px 28px;
+            padding: 14px 32px;
             border: none;
-            border-radius: 0;
+            border-radius: 8px;
             font-size: 14px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
+            font-weight: 600;
+            letter-spacing: 0;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             display: inline-block;
             min-width: 200px;
         }
         
         .button-container {
-            padding: 20px;
+            padding: 24px;
             display: flex;
-            gap: 10px;
+            gap: 12px;
             justify-content: center;
-            background: #ffffff;
+            background: #edeae4;
+            border-top: none;
         }
         
         .btn-primary {
-            background: #1a472a;
+            background: #1a1a1a;
             color: #ffffff;
-            border: 2px solid #1a472a;
+            border: 1px solid #1a1a1a;
         }
         
         .btn-primary:hover {
-            background: #234f35;
-            border-color: #234f35;
+            background: #333;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
         
         .btn-secondary {
             background: #ffffff;
-            color: #1a472a;
-            border: 2px solid #1a472a;
+            color: #1a1a1a;
+            border: none;
         }
         
         .btn-secondary:hover {
@@ -310,7 +283,7 @@
         
         .loading {
             display: none;
-            color: #1a472a;
+            color: #1a1a1a;
             text-align: center;
             padding: 40px;
             font-size: 1.1em;
@@ -325,7 +298,7 @@
             display: none;
             margin: 0;
             padding: 0;
-            background: #ffffff;
+            background: #edeae4;
             width: 100%;
         }
         
@@ -334,50 +307,59 @@
         }
         
         .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 1px;
-            background: #2d5a3d;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 16px;
+            background: #edeae4;
             border: none;
             margin: 0 0 20px 0;
+            padding: 24px;
         }
         
         .stat-card {
-            background: #1a472a;
+            background: #ffffff;
             padding: 20px;
-            text-align: left;
-            border: none;
+            text-align: center;
+            border: 1px solid #ddd9d3;
+            border-radius: 8px;
+            min-width: fit-content;
+            flex: 0 1 auto;
         }
         
         .stat-label {
-            color: #88b399;
+            color: #888888;
             font-size: 0.75em;
             margin-bottom: 8px;
             font-weight: 600;
-            letter-spacing: 0.3px;
+            letter-spacing: 0;
+            text-transform: uppercase;
         }
         
         .stat-value {
-            color: #ffffff;
+            color: #1a1a1a;
             font-size: 1.8em;
             font-weight: 700;
-            letter-spacing: -0.5px;
+            letter-spacing: -0.02em;
         }
         
         .stat-value.positive {
-            color: #ffffff;
+            color: #10b981;
         }
         
         .stat-value.negative {
-            color: #999999;
+            color: #ef4444;
         }
         
         .chart-container {
-            background: #ffffff;
+            background: #edeae4;
             border: none;
             padding: 20px;
             margin: 0 auto;
             width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
         
         .info-box {
@@ -393,20 +375,19 @@
 <body>
     <div class="container">
         <header>
-            <h1>SmartBot V2 - Multi-Stock Portfolio (US)</h1>
-            <p class="subtitle">Advanced DCA Strategy for US Stock Market with Portfolio Management (Powered by Alpaca)</p>
+            <h1>KRONOS CAPITAL BACKTESTEUR</h1>
+            <p class="subtitle">Portfolio multi-actions SmartBot V2</p>
             <div class="nav-links">
-                <a href="index.html" class="nav-btn" style="background: #2d5a3d; color: #7cbb8f; border-color: #2d8659;">🏠 Home</a>
-                <a href="configure_smartbot.html" class="nav-btn crypto-single">🪙 Crypto Single</a>
-                <a href="run_multi_smartbot.html" class="nav-btn crypto-multi">📊 Crypto Multi</a>
-                <a href="configure_smartbot_stocks.html" class="nav-btn stock-single">📈 Stock Single</a>
-                <a href="run_multi_smartbot_stocks.html" class="nav-btn stock-multi active">📊 Stocks Multi</a>
+                <a href="index.html" class="nav-btn">Home</a>
+                <a href="configure_smartbot.html" class="nav-btn">Crypto Single</a>
+                <a href="run_multi_smartbot.html" class="nav-btn">Crypto Multi</a>
+                <a href="configure_smartbot_stocks.html" class="nav-btn">Stock Single</a>
+                <a href="run_multi_smartbot_stocks.html" class="nav-btn active">Stocks Multi</a>
             </div>
         </header>
 
         <form id="backtestForm">
             <div class="sections-container">
-                <div class="sections-headers">
                     <!-- Portfolio Settings -->
                     <div class="section">
                         <div class="accordion-header active" onclick="toggleAccordion(0)">
@@ -613,13 +594,6 @@
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
-
-            <div class="info-box">
-                <strong>Portfolio Mode:</strong> This will run SmartBot V2 strategy across multiple assets simultaneously 
-                with a shared capital pool. The "Max Active Trades" parameter limits how many positions can be open at the same time. 
-                Each asset will compete for capital based on entry signals. Trades marked as "open at end" will be shown in statistics.
             </div>
 
             <div class="button-container">
@@ -809,11 +783,10 @@
                     <div class="stat-value">${stats.total_trades}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Win Rate (Avg TradingView)</div>
+                    <div class="stat-label">Win Rate</div>
                     <div class="stat-value ${(stats.avg_win_rate_tradingview || stats.avg_win_rate || 0) >= 50 ? 'positive' : 'negative'}">
                         ${(stats.avg_win_rate_tradingview || stats.avg_win_rate || 0).toFixed(1)}%
                     </div>
-                    <div style="font-size: 0.7em; color: #666; margin-top: 5px;">Méthode TradingView</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Max Drawdown</div>
@@ -841,8 +814,21 @@
                 </div>
             `;
 
-            // Display per-asset breakdown
-            let perAssetHTML = '<div style="padding: 20px;"><h3 style="margin-bottom: 20px; font-size: 1.2em;">Per-Asset Performance</h3>';
+            // Display charts container
+            const chartContainer = document.getElementById('chartContainer');
+            
+            // 1. Portfolio equity curve (FIRST - in white card)
+            let equityHTML = '';
+            if (data.combined_equity && data.combined_equity.length > 0) {
+                equityHTML = `
+                    <div style="background: #ffffff; padding: 20px; border-radius: 12px; margin: 0 0 20px 0;">
+                        <div id="equity-chart" style="width: 100%;"></div>
+                    </div>
+                `;
+            }
+            
+            // 2. Display per-asset breakdown (SECOND)
+            let perAssetHTML = '<div style="padding: 20px; background: #edeae4;"><h3 style="margin-bottom: 20px; font-size: 1.2em; color: #1a1a1a;">Per-Asset Performance</h3>';
             perAssetHTML += '<div style="display: grid; gap: 15px;">';
             
             Object.entries(perAsset).forEach(([asset, astats]) => {
@@ -852,6 +838,10 @@
                 // ✅ Recalculer les stats à partir de individual_positions pour cohérence
                 const positions = astats.individual_positions || [];
                 const assetPositions = positions.length;
+                
+                // Skip assets with no trades
+                if (assetPositions === 0) return;
+                
                 const assetWinningPos = positions.filter(p => p.is_win).length;
                 const assetWinRate = assetPositions > 0 ? (assetWinningPos / assetPositions * 100) : 0;
                 const assetPnl = positions.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0);
@@ -876,7 +866,7 @@
                             </div>
                         </div>
                         <div id="${chartId}" style="display: none; padding: 15px; background: white; border-top: 1px solid #ddd;">
-                            <div id="${chartId}-container" style="margin-bottom: 20px;"></div>
+                            <div id="${chartId}-container" style="width: 98%; margin: 0 auto 20px auto;"></div>
                             <div id="${tableId}" style="width: 100%;"></div>
                         </div>
                     </div>
@@ -885,13 +875,11 @@
             
             perAssetHTML += '</div></div>';
 
-            // Display charts
-            const chartContainer = document.getElementById('chartContainer');
-            chartContainer.innerHTML = perAssetHTML;
+            // Combine equity curve + per-asset sections
+            chartContainer.innerHTML = equityHTML + perAssetHTML;
 
-            // Portfolio equity curve
+            // Render equity curve using Plotly (if data exists)
             if (data.combined_equity && data.combined_equity.length > 0) {
-                chartContainer.innerHTML += '<div id="equity-chart" style="margin: 20px;"></div>';
                 
                 const dates = data.combined_equity.map(e => e.date);
                 const equity = data.combined_equity.map(e => e.equity);
@@ -946,6 +934,13 @@
                     paper_bgcolor: '#ffffff',
                     plot_bgcolor: '#ffffff',
                     hovermode: 'x unified',
+                    margin: {
+                        l: 60,
+                        r: 60,
+                        t: 80,
+                        b: 60,
+                        pad: 10
+                    },
                     shapes: [{
                         type: 'line',
                         x0: dates[0],
