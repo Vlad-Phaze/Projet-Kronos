@@ -745,10 +745,11 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     # Equity curve basée sur la valeur réelle du portefeuille (capital + positions)
     courbe_equite = pd.Series(equity_at_bar, index=prix.index)
     
-    # OPTIMISATION: Utiliser seulement la portion utilisée du capital_history_array
-    capital_array = capital_history_array[:capital_event_idx]
-    peak_capital = np.maximum.accumulate(capital_array)
-    drawdowns = capital_array - peak_capital
+    # CALCUL DU DRAWDOWN LATENT (pertes non réalisées)
+    # Utiliser equity_at_bar au lieu de capital_array pour capturer les vraies pertes latentes
+    equity_array = equity_at_bar  # Equity = capital disponible + valeur des positions
+    peak_equity = np.maximum.accumulate(equity_array)
+    drawdowns = equity_array - peak_equity  # Drawdown latent (perte par rapport au pic)
     max_drawdown = float(np.min(drawdowns)) if len(drawdowns) > 0 else 0.0
     max_drawdown_pct = (max_drawdown / parametres.initial_capital * 100) if parametres.initial_capital > 0 else 0.0
     
@@ -1721,13 +1722,6 @@ def backtest_smartbot_v2_multi_portfolio(
                 'open_trades': []
             }
     
-    # OPTIMISATION: Calcul du drawdown avec le capital_history_array pré-alloué
-    capital_array = capital_history_array[:capital_event_idx]
-    peak_capital = np.maximum.accumulate(capital_array)
-    drawdowns = capital_array - peak_capital
-    max_drawdown = float(np.min(drawdowns)) if len(drawdowns) > 0 else 0.0
-    max_drawdown_pct = (max_drawdown / parametres.initial_capital * 100) if parametres.initial_capital > 0 else 0.0
-    
     # Créer l'équité combinée
     equity_df = pd.DataFrame(equity_history)
     if not equity_df.empty:
@@ -1735,6 +1729,18 @@ def backtest_smartbot_v2_multi_portfolio(
         combined_equity = equity_df['equity']
     else:
         combined_equity = pd.Series()
+    
+    # CALCUL DU DRAWDOWN LATENT (pertes non réalisées)
+    # Utiliser equity_history au lieu de capital_array pour capturer les vraies pertes latentes
+    if not equity_df.empty:
+        equity_array = equity_df['equity'].to_numpy()
+        peak_equity = np.maximum.accumulate(equity_array)
+        drawdowns = equity_array - peak_equity  # Drawdown latent (perte par rapport au pic)
+        max_drawdown = float(np.min(drawdowns)) if len(drawdowns) > 0 else 0.0
+        max_drawdown_pct = (max_drawdown / parametres.initial_capital * 100) if parametres.initial_capital > 0 else 0.0
+    else:
+        max_drawdown = 0.0
+        max_drawdown_pct = 0.0
     
     print(f"\n{'='*80}")
     print(f"📈 RÉSULTATS PORTFOLIO")
