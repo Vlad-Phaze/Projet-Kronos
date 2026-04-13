@@ -665,6 +665,28 @@
     </div>
 
     <script>
+        function formatDateInput(dateObj) {
+            const year = dateObj.getFullYear();
+            const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const day = String(dateObj.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function applyDynamicStockDateRange() {
+            const end = new Date();
+            end.setDate(end.getDate() - 7);
+
+            const start = new Date(end);
+            start.setDate(start.getDate() - 700);
+
+            const startInput = document.getElementById('start_date');
+            const endInput = document.getElementById('end_date');
+            if (startInput && endInput) {
+                startInput.value = formatDateInput(start);
+                endInput.value = formatDateInput(end);
+            }
+        }
+
         function toggleAccordion(index) {
             const targetHeader = document.querySelectorAll('.accordion-header')[index];
             const targetContent = document.querySelector(`.accordion-content[data-section="${index}"]`);
@@ -677,8 +699,11 @@
         function resetForm() {
             if (confirm('Reset all parameters?')) {
                 document.getElementById('backtestForm').reset();
+                applyDynamicStockDateRange();
             }
         }
+
+        applyDynamicStockDateRange();
 
         document.getElementById('backtestForm').addEventListener('submit', async (e) => {
             e.preventDefault();

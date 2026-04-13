@@ -618,6 +618,28 @@
     </div>
 
     <script>
+        function formatDateInput(dateObj) {
+            const year = dateObj.getFullYear();
+            const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const day = String(dateObj.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function applyDynamicStockDateRange() {
+            const end = new Date();
+            end.setDate(end.getDate() - 7);
+
+            const start = new Date(end);
+            start.setDate(start.getDate() - 700);
+
+            const startInput = document.getElementById('start_date');
+            const endInput = document.getElementById('end_date');
+            if (startInput && endInput) {
+                startInput.value = formatDateInput(start);
+                endInput.value = formatDateInput(end);
+            }
+        }
+
         function toggleAccordion(index) {
             const targetHeader = document.querySelectorAll('.accordion-header')[index];
             const targetContent = document.querySelector(`.accordion-content[data-section="${index}"]`);
@@ -629,8 +651,11 @@
         function resetForm() {
             if (confirm('Reset all parameters?')) {
                 document.getElementById('backtestForm').reset();
+                applyDynamicStockDateRange();
             }
         }
+
+        applyDynamicStockDateRange();
 
         document.getElementById('backtestForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -774,6 +799,28 @@
             const stats = buildCombinedDisplayStats(data);
             const perAsset = data.per_asset_stats || {};
             const totalTrades = Number(stats.total_deals || stats.total_trades || 0);
+            let displayMaxDrawdown = Number(stats.max_drawdown || 0);
+            let displayMaxDrawdownPct = Number(stats.max_drawdown_pct || 0);
+
+            // Aligner la carte Max Drawdown sur la même logique que le graphique drawdown
+            if (data.combined_equity && data.combined_equity.length > 0) {
+                const equitySeries = data.combined_equity.map(e => Number(e.equity || 0));
+                let peak = equitySeries[0] || 0;
+                let minDrawdown = 0;
+                let minDrawdownPct = 0;
+
+                for (let i = 0; i < equitySeries.length; i++) {
+                    const val = equitySeries[i];
+                    if (val > peak) peak = val;
+                    const dd = val - peak;
+                    const ddPct = peak > 0 ? (dd / peak) * 100 : 0;
+                    if (dd < minDrawdown) minDrawdown = dd;
+                    if (ddPct < minDrawdownPct) minDrawdownPct = ddPct;
+                }
+
+                displayMaxDrawdown = minDrawdown;
+                displayMaxDrawdownPct = minDrawdownPct;
+            }
             const openTradeAssets = Object.entries(perAsset)
                 .filter(([, astats]) => Array.isArray(astats.open_trades) && astats.open_trades.length > 0)
                 .map(([asset]) => asset);
@@ -811,7 +858,7 @@
                 <div class="stat-card">
                     <div class="stat-label">Max Drawdown</div>
                     <div class="stat-value negative">
-                        $${Math.abs(stats.max_drawdown || 0).toFixed(2)} (${Math.abs(stats.max_drawdown_pct || 0).toFixed(2)}%)
+                        $${Math.abs(displayMaxDrawdown).toFixed(2)} (${Math.abs(displayMaxDrawdownPct).toFixed(2)}%)
                     </div>
                 </div>
                 <div class="stat-card">

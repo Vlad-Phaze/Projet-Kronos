@@ -714,6 +714,28 @@
             const statsGrid = document.getElementById('statsGrid');
             const stats = data.combined_stats || {};
             const perAsset = data.per_asset_stats || {};
+            let displayMaxDrawdown = Number(stats.max_drawdown || 0);
+            let displayMaxDrawdownPct = Number(stats.max_drawdown_pct || 0);
+
+            // Aligner la carte Max Drawdown sur la même logique que le graphique drawdown
+            if (data.combined_equity && data.combined_equity.length > 0) {
+                const equitySeries = data.combined_equity.map(e => Number(e.equity || 0));
+                let peak = equitySeries[0] || 0;
+                let minDrawdown = 0;
+                let minDrawdownPct = 0;
+
+                for (let i = 0; i < equitySeries.length; i++) {
+                    const val = equitySeries[i];
+                    if (val > peak) peak = val;
+                    const dd = val - peak;
+                    const ddPct = peak > 0 ? (dd / peak) * 100 : 0;
+                    if (dd < minDrawdown) minDrawdown = dd;
+                    if (ddPct < minDrawdownPct) minDrawdownPct = ddPct;
+                }
+
+                displayMaxDrawdown = minDrawdown;
+                displayMaxDrawdownPct = minDrawdownPct;
+            }
             const openTradeAssets = Object.entries(perAsset)
                 .filter(([, astats]) => Array.isArray(astats.open_trades) && astats.open_trades.length > 0)
                 .map(([asset]) => asset);
@@ -761,7 +783,7 @@
                 <div class="stat-card">
                     <div class="stat-label">Max Drawdown</div>
                     <div class="stat-value negative">
-                        $${Math.abs(stats.max_drawdown || 0).toFixed(2)} (${Math.abs(stats.max_drawdown_pct || 0).toFixed(2)}%)
+                        $${Math.abs(displayMaxDrawdown).toFixed(2)} (${Math.abs(displayMaxDrawdownPct).toFixed(2)}%)
                     </div>
                 </div>
                 <div class="stat-card">

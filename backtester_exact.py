@@ -776,7 +776,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     peak_equity = np.maximum.accumulate(equity_array)
     drawdowns = equity_array - peak_equity  # Drawdown latent (perte par rapport au pic)
     max_drawdown = float(np.min(drawdowns)) if len(drawdowns) > 0 else 0.0
-    max_drawdown_pct = (max_drawdown / parametres.initial_capital * 100) if parametres.initial_capital > 0 else 0.0
+    drawdown_pct_array = np.where(peak_equity > 0, (drawdowns / peak_equity) * 100, 0.0)
+    max_drawdown_pct = float(np.min(drawdown_pct_array)) if len(drawdown_pct_array) > 0 else 0.0
     
     # ═══════════════════════════════════════════════════════════
     # NOUVELLES MÉTRIQUES DEMANDÉES
@@ -1825,7 +1826,8 @@ def backtest_smartbot_v2_multi_portfolio(
         peak_equity = np.maximum.accumulate(equity_array)
         drawdowns = equity_array - peak_equity  # Drawdown latent (perte par rapport au pic)
         max_drawdown = float(np.min(drawdowns)) if len(drawdowns) > 0 else 0.0
-        max_drawdown_pct = (max_drawdown / parametres.initial_capital * 100) if parametres.initial_capital > 0 else 0.0
+        drawdown_pct_array = np.where(peak_equity > 0, (drawdowns / peak_equity) * 100, 0.0)
+        max_drawdown_pct = float(np.min(drawdown_pct_array)) if len(drawdown_pct_array) > 0 else 0.0
     else:
         max_drawdown = 0.0
         max_drawdown_pct = 0.0
