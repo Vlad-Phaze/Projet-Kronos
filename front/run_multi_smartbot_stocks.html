@@ -713,6 +713,15 @@
         function buildCombinedDisplayStats(data) {
             const combinedStats = data.combined_stats || {};
             const perAsset = data.per_asset_stats || {};
+            
+            // DEBUG: Afficher les nouvelles métriques reçues
+            console.log('📊 DEBUG - Combined Stats reçu:', combinedStats);
+            console.log('   total_days:', combinedStats.total_days);
+            console.log('   trades_per_day:', combinedStats.trades_per_day);
+            console.log('   avg_open_positions_per_day:', combinedStats.avg_open_positions_per_day);
+            console.log('   max_capital_used:', combinedStats.max_capital_used);
+            console.log('   max_capital_used_pct:', combinedStats.max_capital_used_pct);
+            
             const allPositions = [];
 
             Object.values(perAsset).forEach(assetStats => {
@@ -722,14 +731,14 @@
             });
 
             const initialCapital = Number(combinedStats.initial_capital || 0);
-            const totalTrades = allPositions.length;
+            const totalPositions = allPositions.length;
             const totalDeals = allPositions.filter(position => String(position.type || '').startsWith('BO_')).length;
             const totalSoPlaced = allPositions.filter(position => String(position.type || '').startsWith('SO_')).length;
             const totalPnl = allPositions.reduce((sum, position) => sum + Number(position.pnl || 0), 0);
-            const avgPnlPerTrade = totalTrades > 0 ? totalPnl / totalTrades : 0;
+            const avgPnlPerTrade = totalDeals > 0 ? totalPnl / totalDeals : 0;
             const avgSoPerTrade = totalDeals > 0 ? totalSoPlaced / totalDeals : 0;
             const winCount = allPositions.filter(position => Number(position.pnl || 0) > 0).length;
-            const winRateTradingview = totalTrades > 0 ? (winCount / totalTrades) * 100 : 0;
+            const winRateTradingview = totalPositions > 0 ? (winCount / totalPositions) * 100 : 0;
             const maxSoUsed = allPositions.reduce((maxValue, position) => {
                 const match = String(position.type || '').match(/^SO_(\d+)$/);
                 return match ? Math.max(maxValue, Number(match[1])) : maxValue;
@@ -739,7 +748,7 @@
                 initial_capital: initialCapital,
                 final_capital: initialCapital + totalPnl,
                 total_return_pct: initialCapital > 0 ? (totalPnl / initialCapital) * 100 : 0,
-                total_trades: totalTrades,
+                total_trades: Number(combinedStats.total_deals || totalDeals),
                 total_deals: totalDeals,
                 total_so_placed: totalSoPlaced,
                 total_pnl: totalPnl,
@@ -750,7 +759,13 @@
                 max_drawdown: Number(combinedStats.max_drawdown || 0),
                 max_drawdown_pct: Number(combinedStats.max_drawdown_pct || 0),
                 open_trades_at_end: Number(combinedStats.open_trades_at_end || 0),
-                assets_count: Object.keys(perAsset).length
+                assets_count: Object.keys(perAsset).length,
+                // NOUVELLES MÉTRIQUES
+                total_days: Number(combinedStats.total_days || 0),
+                trades_per_day: Number(combinedStats.trades_per_day || 0),
+                avg_open_positions_per_day: Number(combinedStats.avg_open_positions_per_day || 0),
+                max_capital_used: Number(combinedStats.max_capital_used || 0),
+                max_capital_used_pct: Number(combinedStats.max_capital_used_pct || 0)
             };
         }
 
@@ -758,6 +773,11 @@
             const statsGrid = document.getElementById('statsGrid');
             const stats = buildCombinedDisplayStats(data);
             const perAsset = data.per_asset_stats || {};
+            const totalTrades = Number(stats.total_deals || stats.total_trades || 0);
+            const openTradeAssets = Object.entries(perAsset)
+                .filter(([, astats]) => Array.isArray(astats.open_trades) && astats.open_trades.length > 0)
+                .map(([asset]) => asset);
+            const openTradeAssetsText = openTradeAssets.length > 0 ? openTradeAssets.join(', ') : 'None';
 
             statsGrid.innerHTML = `
                 <div class="stat-card">
@@ -780,7 +800,7 @@
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Total Trades</div>
-                    <div class="stat-value">${stats.total_trades}</div>
+                    <div class="stat-value">${totalTrades}</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Win Rate</div>
@@ -811,18 +831,48 @@
                     <div class="stat-value ${stats.open_trades_at_end > 0 ? 'negative' : ''}">
                         ${stats.open_trades_at_end || 0}
                     </div>
+                    <div style="font-size: 0.82em; color: #666; margin-top: 6px; line-height: 1.4;">
+                        ${openTradeAssetsText}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Days</div>
+                    <div class="stat-value">
+                        ${stats.total_days || 0} days
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Trades / Day</div>
+                    <div class="stat-value">
+                        ${(stats.trades_per_day || 0).toFixed(2)}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Open Positions</div>
+                    <div class="stat-value">
+                        ${(stats.avg_open_positions_per_day || 0).toFixed(2)}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Max Capital Used</div>
+                    <div class="stat-value ${(stats.max_capital_used_pct || 0) > 90 ? 'negative' : 'positive'}">
+                        $${(stats.max_capital_used || 0).toFixed(2)} (${(stats.max_capital_used_pct || 0).toFixed(2)}%)
+                    </div>
                 </div>
             `;
 
             // Display charts container
             const chartContainer = document.getElementById('chartContainer');
             
-            // 1. Portfolio equity curve (FIRST - in white card)
+            // 1. Portfolio equity + drawdown curves (FIRST - horizontal layout)
             let equityHTML = '';
             if (data.combined_equity && data.combined_equity.length > 0) {
                 equityHTML = `
                     <div style="background: #ffffff; padding: 20px; border-radius: 12px; margin: 0 0 20px 0;">
-                        <div id="equity-chart" style="width: 100%;"></div>
+                        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                            <div id="equity-chart" style="flex: 1; min-width: 400px;"></div>
+                            <div id="drawdown-chart" style="flex: 1; min-width: 400px;"></div>
+                        </div>
                     </div>
                 `;
             }
@@ -857,7 +907,8 @@
                                 <span id="arrow-${asset}" style="font-size: 1.2em; transition: transform 0.3s;">▼</span>
                             </div>
                             <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.9em; margin-top: 10px;">
-                                <div><strong>Trades:</strong> ${assetPositions}</div>
+                                <div><strong>Trades:</strong> ${assetDeals}</div>
+                                <div><strong>Positions:</strong> ${assetPositions}</div>
                                 <div title="Méthode TradingView: chaque position (BO, SO1, SO2...) compte séparément"><strong>Win Rate (TV):</strong> ${assetWinRate.toFixed(1)}%</div>
                                 <div><strong>PnL:</strong> $${assetPnl.toFixed(2)}</div>
                                 <div><strong>SO Placed:</strong> ${assetSoPlaced}</div>
@@ -883,6 +934,71 @@
                 
                 const dates = data.combined_equity.map(e => e.date);
                 const equity = data.combined_equity.map(e => e.equity);
+                
+                // Calculate open TRADES at each date for hover info  
+                // Un trade = 1 BO + tous ses SO (même trade_id)
+                const allPositions = [];
+                Object.entries(data.per_asset_stats || {}).forEach(([asset, assetStats]) => {
+                    if (Array.isArray(assetStats.individual_positions)) {
+                        allPositions.push(...assetStats.individual_positions.map(pos => ({ ...pos, asset })));
+                    }
+                });
+                
+                // DEBUG: Analyser les positions multi-asset
+                if (allPositions.length > 0) {
+                    console.log("🔍 DEBUG MULTI-ASSET TRADES:");
+                    console.log("  Total positions (tous assets):", allPositions.length);
+                    console.log("  Première position:", allPositions[0]);
+                    console.log("  trade_id présent?", !!allPositions[0].trade_id);
+                    
+                    // Compter les trades uniques
+                    const uniqueTrades = new Set(allPositions.map(p => p.trade_id || p.exit_time));
+                    console.log("  Nombre de trades uniques:", uniqueTrades.size);
+                    console.log("  Avg open positions (stats):", stats.avg_open_positions_per_day);
+                    
+                    // Afficher quelques exemples
+                    console.log("  Exemples de groupement:");
+                    allPositions.slice(0, 8).forEach(p => {
+                        const tid = p.trade_id || p.exit_time;
+                        console.log(`    ${p.type}: trade_id=${p.trade_id}, exit=${p.exit_time}, grouped_as=${tid}`);
+                    });
+                }
+                
+                // Préparer les groupes de trades une seule fois
+                const tradeGroups = {};
+                allPositions.forEach(pos => {
+                    const tradeId = pos.trade_id || pos.exit_time; // Fallback sur exit_time
+                    if (!tradeGroups[tradeId]) {
+                        tradeGroups[tradeId] = {
+                            entryTimes: [],
+                            exitTimes: [],
+                            asset: pos.asset || 'N/A'
+                        };
+                    }
+                    tradeGroups[tradeId].entryTimes.push(new Date(pos.entry_time));
+                    tradeGroups[tradeId].exitTimes.push(new Date(pos.exit_time));
+                });
+
+                const openTradesHoverData = dates.map(equityDate => {
+                    const equityDateTime = new Date(equityDate);
+
+                    // Compter les trades ouverts (entre la première entrée et la dernière sortie du trade)
+                    let openTradesCount = 0;
+                    const openAssets = [];
+                    for (const tradeId in tradeGroups) {
+                        const trade = tradeGroups[tradeId];
+                        const tradeEntry = Math.min(...trade.entryTimes);
+                        const tradeExit = Math.max(...trade.exitTimes);
+
+                        if (tradeEntry <= equityDateTime && equityDateTime <= tradeExit) {
+                            openTradesCount++;
+                            openAssets.push(trade.asset);
+                        }
+                    }
+
+                    const uniqueAssets = [...new Set(openAssets)];
+                    return [openTradesCount, uniqueAssets.join(', ') || 'None'];
+                });
                 
                 // Calculate Y-axis range for better visualization
                 const initialCapital = stats.initial_capital || equity[0];
@@ -912,7 +1028,9 @@
                     name: 'Portfolio Equity',
                     line: {color: '#000000', width: 2},
                     fill: 'tozeroy',
-                    fillcolor: 'rgba(0, 0, 0, 0.1)'
+                    fillcolor: 'rgba(0, 0, 0, 0.1)',
+                    customdata: openTradesHoverData,
+                    hovertemplate: '<b>%{x}</b><br>Equity: $%{y:,.2f}<br>Open Trades: %{customdata[0]}<br>Assets: %{customdata[1]}<extra></extra>'
                 };
                 
                 const layout = {
@@ -933,7 +1051,7 @@
                     },
                     paper_bgcolor: '#ffffff',
                     plot_bgcolor: '#ffffff',
-                    hovermode: 'x unified',
+                    hovermode: 'closest',
                     margin: {
                         l: 60,
                         r: 60,
@@ -956,6 +1074,58 @@
                 };
                 
                 Plotly.newPlot('equity-chart', [trace], layout, {responsive: true});
+                
+                // Calculate and render drawdown chart
+                const drawdowns = [];
+                let peak = equity[0];
+                for (let i = 0; i < equity.length; i++) {
+                    if (equity[i] > peak) {
+                        peak = equity[i];
+                    }
+                    const drawdown = peak > 0 ? ((equity[i] - peak) / peak) * 100 : 0;
+                    drawdowns.push(drawdown);
+                }
+                
+                const drawdownTrace = {
+                    x: dates,
+                    y: drawdowns,
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: 'Drawdown',
+                    line: {color: '#ef4444', width: 2},
+                    fill: 'tozeroy',
+                    fillcolor: 'rgba(239, 68, 68, 0.1)',
+                    hovertemplate: '<b>%{x}</b><br>Drawdown: %{y:.2f}%<extra></extra>'
+                };
+                
+                const drawdownLayout = {
+                    title: {
+                        text: 'Portfolio Drawdown',
+                        font: {size: 18, color: '#000000', family: 'Arial Black'}
+                    },
+                    xaxis: {
+                        title: 'Date',
+                        titlefont: {size: 12, color: '#000000'},
+                        gridcolor: '#e0e0e0'
+                    },
+                    yaxis: {
+                        title: 'Drawdown (%)',
+                        titlefont: {size: 12, color: '#000000'},
+                        gridcolor: '#e0e0e0'
+                    },
+                    paper_bgcolor: '#ffffff',
+                    plot_bgcolor: '#ffffff',
+                    hovermode: 'closest',
+                    margin: {
+                        l: 60,
+                        r: 60,
+                        t: 80,
+                        b: 60,
+                        pad: 10
+                    }
+                };
+                
+                Plotly.newPlot('drawdown-chart', [drawdownTrace], drawdownLayout, {responsive: true});
             }
 
             // Individual asset price charts - render into collapsed sections

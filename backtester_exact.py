@@ -315,6 +315,10 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     Backtester SmartBot V2 - Reproduction EXACTE de la logique Pine Script
     avec SO Multiplicator Method
     """
+    print("="*80)
+    print("🚨 BACKTESTER_EXACT.PY VERSION AVEC NOUVELLES MÉTRIQUES CHARGÉE!")
+    print("="*80)
+    
     for c in ("Open", "High", "Low", "Close"):
         assert c in prix.columns, f"❌ Colonne manquante: {c}"
     
@@ -367,6 +371,11 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     pnl_realise = np.zeros(n, dtype=float)
     individual_positions = []  # Liste pour positions individuelles
     
+    # NOUVELLES MÉTRIQUES: Tracking des positions ouvertes et capital utilisé
+    open_positions_at_bar = np.zeros(n, dtype=int)  # Nombre de positions (BO + SO) à chaque barre
+    capital_used_at_bar = np.zeros(n, dtype=float)  # Capital utilisé (bloqué) à chaque barre
+    max_capital_used = 0.0  # Capital maximum utilisé pendant tout le backtest
+    
     print(f"🚀 Début du backtest - {len(close)} barres")
     print(f"📋 Configuration: DSC='{parametres.dsc}', Price Deviation='{parametres.pricedevbase}'")
     print(f"💰 Capital Initial=${parametres.initial_capital:.2f}")
@@ -409,6 +418,11 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 if capital_event_idx < max_capital_events:
                     capital_history_array[capital_event_idx] = capital_disponible
                     capital_event_idx += 1
+                
+                # NOUVELLES MÉTRIQUES: Mettre à jour le tracking
+                capital_used = parametres.initial_capital - capital_disponible
+                if capital_used > max_capital_used:
+                    max_capital_used = capital_used
                 
                 print(f"📍 [{indice[t].strftime('%Y-%m-%d')}] BASE ORDER @ ${price:.2f} | Qty={qty:.6f} | Capital restant=${capital_disponible:.2f}")
         
@@ -572,19 +586,30 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                         capital_history_array[capital_event_idx] = capital_disponible
                         capital_event_idx += 1
                     
+                    # NOUVELLES MÉTRIQUES: Mettre à jour le tracking
+                    capital_used = parametres.initial_capital - capital_disponible
+                    if capital_used > max_capital_used:
+                        max_capital_used = capital_used
+                    
                     print(f"🔻 [{indice[t].strftime('%Y-%m-%d')}] SAFETY ORDER #{current_so_count} @ ${price:.2f} | "
                           f"Size=${so_size:.2f} | Avg=${avg_entry_price:.2f} | Capital=${capital_disponible:.2f}")
         
         # ═══════════════════════════════════════════════════════════
-        # MISE À JOUR DE L'EQUITY À CETTE BARRE
+        # MISE À JOUR DE L'EQUITY ET TRACKING À CETTE BARRE
         # ═══════════════════════════════════════════════════════════
         if in_trade:
             # Equity = capital disponible + valeur des positions ouvertes
             valeur_position = total_position_size * price
             equity_at_bar[t] = capital_disponible + valeur_position
+            
+            # NOUVELLES MÉTRIQUES: Tracker les positions ouvertes et capital utilisé
+            open_positions_at_bar[t] = 1 + current_so_count  # BO + SO
+            capital_used_at_bar[t] = parametres.initial_capital - capital_disponible
         else:
             # Pas de position, equity = capital disponible
             equity_at_bar[t] = capital_disponible
+            open_positions_at_bar[t] = 0
+            capital_used_at_bar[t] = 0.0
     
     # ═══════════════════════════════════════════════════════════
     # SI POSITION OUVERTE À LA FIN
@@ -753,6 +778,20 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     max_drawdown = float(np.min(drawdowns)) if len(drawdowns) > 0 else 0.0
     max_drawdown_pct = (max_drawdown / parametres.initial_capital * 100) if parametres.initial_capital > 0 else 0.0
     
+    # ═══════════════════════════════════════════════════════════
+    # NOUVELLES MÉTRIQUES DEMANDÉES
+    # ═══════════════════════════════════════════════════════════
+    # 1. Nombre de jours de trading
+    total_days = (prix.index[-1] - prix.index[0]).days
+    total_days = max(total_days, 1)  # Éviter division par zéro
+    
+    # 2. Moyenne de positions ouvertes par jour
+    # Calculer la moyenne du nombre de positions ouvertes sur toute la période
+    avg_open_positions = float(np.mean(open_positions_at_bar))
+    
+    # 3. Max capital utilisé pendant le backtest (déjà tracké)
+    max_capital_used_pct = (max_capital_used / parametres.initial_capital * 100) if parametres.initial_capital > 0 else 0.0
+    
     statistiques = {}
     if not df_trades.empty:
         winning_trades = df_trades[df_trades["pnl"] > 0]
@@ -793,6 +832,9 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
         # Ancien win rate (deals complets)
         win_rate_deals = float(len(winning_trades) / len(df_trades) * 100) if len(df_trades) > 0 else 0.0
         
+        # NOUVELLES MÉTRIQUES: Calcul du nombre de trades par jour
+        trades_per_day = float(len(df_trades) / total_days) if total_days > 0 else 0.0
+        
         statistiques = {
             "total_trades": total_positions_including_open,  # BO + SO (positions individuelles)
             "total_orders_placed": total_positions_including_open,
@@ -819,7 +861,13 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             "final_capital": float(capital_disponible),
             "capital_return_pct": return_from_total_pnl_pct,
             "open_trades_at_end": open_trades_at_end,
-            "open_trade": open_trade_details
+            "open_trade": open_trade_details,
+            # NOUVELLES MÉTRIQUES
+            "trades_per_day": trades_per_day,
+            "avg_open_positions_per_day": avg_open_positions,
+            "max_capital_used": max_capital_used,
+            "max_capital_used_pct": max_capital_used_pct,
+            "total_days": total_days
         }
     else:
         # Aucun trade clôturé, mais peut-être des trades ouverts
@@ -850,7 +898,13 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             "final_capital": float(capital_disponible),
             "capital_return_pct": return_from_total_pnl_pct,
             "open_trades_at_end": open_trades_at_end,
-            "open_trade": open_trade_details
+            "open_trade": open_trade_details,
+            # NOUVELLES MÉTRIQUES
+            "trades_per_day": 0.0,
+            "avg_open_positions_per_day": avg_open_positions,
+            "max_capital_used": max_capital_used,
+            "max_capital_used_pct": max_capital_used_pct,
+            "total_days": total_days
         }
     
     print("="*80)
@@ -876,6 +930,13 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
         print(f"SO totaux placés:   {int(statistiques.get('total_so_placed', 0))}")
         print(f"Max SO utilisé:     {int(statistiques.get('max_so_used', 0))}")
         print(f"Max Drawdown:       ${statistiques['max_drawdown']:.2f} ({statistiques['max_drawdown_pct']:.2f}%)")
+        print(f"-"*80)
+        print(f"📊 NOUVELLES MÉTRIQUES")
+        print(f"-"*80)
+        print(f"Durée totale:       {statistiques['total_days']} jours")
+        print(f"Trades/jour:        {statistiques['trades_per_day']:.2f}")
+        print(f"Moy. pos. ouvertes: {statistiques['avg_open_positions_per_day']:.2f}")
+        print(f"Max capital utilisé: ${statistiques['max_capital_used']:.2f} ({statistiques['max_capital_used_pct']:.2f}%)")
     print("="*80)
     
     return df_trades, courbe_equite, statistiques
@@ -1276,6 +1337,10 @@ def backtest_smartbot_v2_multi_portfolio(
         (per_asset_trades, per_asset_equity, per_asset_stats, combined_equity, combined_stats)
     """
     
+    print("="*80)
+    print("🚨 MULTI-PORTFOLIO AVEC trade_id=f'{asset}_{idx}' CHARGÉ!")
+    print("="*80)
+    
     # Préparer tous les DataFrames avec indicateurs
     assets_prepared = {}
     for asset, df in assets_data.items():
@@ -1499,14 +1564,33 @@ def backtest_smartbot_v2_multi_portfolio(
         
         # Enregistrer l'equity à ce timestamp
         total_equity = capital_disponible
-        for position in positions_ouvertes.values():
-            # Trouver le prix actuel pour cet asset
-            for asset, pos_data in positions_ouvertes.items():
-                if pos_data == position and asset in assets_prepared:
-                    df = assets_prepared[asset]['df']
-                    if timestamp in df.index:
-                        current_price = df.loc[timestamp, 'Close']
-                        total_equity += position['quantity'] * current_price
+        for asset, position in positions_ouvertes.items():
+            if asset not in assets_prepared:
+                continue
+
+            asset_data = assets_prepared[asset]
+            timestamp_map = asset_data['timestamp_to_idx']
+            price_array = asset_data['prix']
+            df_index = asset_data['df'].index
+
+            # Valoriser au dernier prix connu <= timestamp pour éviter les trous de cotation
+            # (jours partiels/fériés) qui créent des chutes artificielles d'equity.
+            if timestamp in timestamp_map:
+                idx = timestamp_map[timestamp]
+            else:
+                ts = pd.Timestamp(timestamp)
+                if getattr(df_index, 'tz', None) is not None and ts.tzinfo is None:
+                    ts = ts.tz_localize(df_index.tz)
+                elif getattr(df_index, 'tz', None) is None and ts.tzinfo is not None:
+                    ts = ts.tz_localize(None)
+                elif getattr(df_index, 'tz', None) is not None and ts.tzinfo is not None:
+                    ts = ts.tz_convert(df_index.tz)
+
+                idx = int(df_index.searchsorted(ts, side='right') - 1)
+
+            if 0 <= idx < len(price_array):
+                current_price = float(price_array[idx])
+                total_equity += position['quantity'] * current_price
         
         equity_history.append({'timestamp': timestamp, 'equity': total_equity})
     
@@ -1669,12 +1753,16 @@ def backtest_smartbot_v2_multi_portfolio(
             winning_individual_positions = 0
             individual_positions = []  # Initialiser pour éviter NameError
             
-            for _, trade in df_trades.iterrows():
+            for trade_idx, (_, trade) in enumerate(df_trades.iterrows(), start=1):
                 positions = trade.get("individual_positions") if hasattr(trade, "get") else None
                 if isinstance(positions, list) and positions:
                     for pos in positions:
                         total_individual_positions += 1
-                        individual_positions.append(pos)  # Ajouter à la liste
+                        # Ajouter le trade_id à chaque position pour groupement
+                        # IMPORTANT: Ajouter l'asset name pour rendre le trade_id unique globalement
+                        pos_with_id = pos.copy()
+                        pos_with_id['trade_id'] = f"{asset}_{trade_idx}"
+                        individual_positions.append(pos_with_id)  # Ajouter à la liste
                         # CORRECTION: Chaque position est WIN si son P&L > 0, 
                         # peu importe qu'elle soit BO ou SO !
                         if pos["pnl"] > 0:

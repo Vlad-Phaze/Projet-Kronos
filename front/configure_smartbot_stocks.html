@@ -790,16 +790,35 @@
                 win_rate_tradingview: winRateTradingview,
                 max_drawdown: Number(stats.max_drawdown || 0),
                 max_drawdown_pct: Number(stats.max_drawdown_pct || 0),
-                open_trades_at_end: Number(stats.open_trades_at_end || 0)
+                open_trades_at_end: Number(stats.open_trades_at_end || 0),
+                // NOUVELLES MÉTRIQUES
+                total_days: Number(stats.total_days || 0),
+                trades_per_day: Number(stats.trades_per_day || 0),
+                avg_open_positions_per_day: Number(stats.avg_open_positions_per_day || 0),
+                max_capital_used: Number(stats.max_capital_used || 0),
+                max_capital_used_pct: Number(stats.max_capital_used_pct || 0)
             };
         }
 
         function displayResults(data) {
             console.log('📊 Data reçue:', data);
             console.log('📋 Positions TradingView:', data.tradingview_positions);
+            console.log('📊 Statistics complètes:', data.statistics);
+            console.log('   total_days:', data.statistics?.total_days);
+            console.log('   trades_per_day:', data.statistics?.trades_per_day);
+            console.log('   avg_open_positions_per_day:', data.statistics?.avg_open_positions_per_day);
+            console.log('   max_capital_used:', data.statistics?.max_capital_used);
+            console.log('   max_capital_used_pct:', data.statistics?.max_capital_used_pct);
             
             const statsGrid = document.getElementById('statsGrid');
             const stats = buildDisplayStats(data);
+            
+            console.log('📈 Stats après buildDisplayStats:', stats);
+            console.log('   total_days:', stats.total_days);
+            console.log('   trades_per_day:', stats.trades_per_day);
+            console.log('   avg_open_positions_per_day:', stats.avg_open_positions_per_day);
+            console.log('   max_capital_used:', stats.max_capital_used);
+            console.log('   max_capital_used_pct:', stats.max_capital_used_pct);
 
             statsGrid.innerHTML = `
                 <div class="stat-card">
@@ -878,6 +897,30 @@
                         $${Math.abs(stats.largest_loss || 0).toFixed(2)}
                     </div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Days</div>
+                    <div class="stat-value">
+                        ${stats.total_days || 0} days
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Trades / Day</div>
+                    <div class="stat-value">
+                        ${(stats.trades_per_day || 0).toFixed(2)}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Open Positions</div>
+                    <div class="stat-value">
+                        ${(stats.avg_open_positions_per_day || 0).toFixed(2)}
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Max Capital Used</div>
+                    <div class="stat-value ${(stats.max_capital_used_pct || 0) > 90 ? 'negative' : 'positive'}">
+                        $${(stats.max_capital_used || 0).toFixed(2)} (${(stats.max_capital_used_pct || 0).toFixed(2)}%)
+                    </div>
+                </div>
             `;
 
             // Display charts
@@ -905,14 +948,23 @@
                 equityDiv.style.flex = '1';
                 chartsRow.appendChild(equityDiv);
                 
-                // Créer div pour price chart
+                // Créer div pour drawdown chart
+                const drawdownDiv = document.createElement('div');
+                drawdownDiv.id = 'drawdown-chart';
+                drawdownDiv.style.flex = '1';
+                chartsRow.appendChild(drawdownDiv);
+                
+                // Ligne 2 : Price chart en pleine largeur
+                const priceRow = document.createElement('div');
+                priceRow.style.marginTop = '20px';
                 const priceDiv = document.createElement('div');
                 priceDiv.id = 'price-chart';
-                priceDiv.style.flex = '1';
-                chartsRow.appendChild(priceDiv);
+                priceDiv.style.width = '100%';
+                priceRow.appendChild(priceDiv);
                 
-                // Ajouter la ligne des graphiques dans la carte
+                // Ajouter les lignes des graphiques dans la carte
                 chartsCard.appendChild(chartsRow);
+                chartsCard.appendChild(priceRow);
                 chartContainer.appendChild(chartsCard);
                 
                 // 2. Créer le conteneur du tableau (pleine largeur, EN DESSOUS)
@@ -926,7 +978,43 @@
                 // Ajouter le conteneur du tableau EN DESSOUS des graphiques
                 chartContainer.appendChild(tableContainer);
                 
-                // 3. Créer le graphique d'équité avec Y-axis optimisée
+                // 3. Calculer le nombre de TRADES OUVERTS à chaque date de l'equity curve
+                // Un trade = 1 BO + tous ses SO (même trade_id)
+                const openTradesAtDate = data.equity_data.x.map(equityDate => {
+                    const equityDateTime = new Date(equityDate);
+                    
+                    // Grouper les positions par trade_id (ou par exit_time si trade_id absent)
+                    // Toutes les positions d'un même trade ont le même exit_time
+                    const tradeGroups = {};
+                    if (data.tradingview_positions) {
+                        data.tradingview_positions.forEach(pos => {
+                            const tradeId = pos.trade_id || pos.exit_time; // Fallback sur exit_time
+                            if (!tradeGroups[tradeId]) {
+                                tradeGroups[tradeId] = {
+                                    entryTimes: [],
+                                    exitTimes: []
+                                };
+                            }
+                            tradeGroups[tradeId].entryTimes.push(new Date(pos.entry_time));
+                            tradeGroups[tradeId].exitTimes.push(new Date(pos.exit_time));
+                        });
+                    }
+                    
+                    // Compter les trades ouverts (entre la première entrée et la dernière sortie du trade)
+                    let openTradesCount = 0;
+                    for (const tradeId in tradeGroups) {
+                        const trade = tradeGroups[tradeId];
+                        const tradeEntry = Math.min(...trade.entryTimes);
+                        const tradeExit = Math.max(...trade.exitTimes);
+                        
+                        if (tradeEntry <= equityDateTime && equityDateTime <= tradeExit) {
+                            openTradesCount++;
+                        }
+                    }
+                    return openTradesCount;
+                });
+                
+                // 4. Créer le graphique d'équité avec Y-axis optimisée + positions ouvertes en hover
                 const equityValues = data.equity_data.y;
                 const initialCapital = stats.initial_capital || equityValues[0];
                 const minEquity = Math.min(...equityValues);
@@ -937,6 +1025,11 @@
                 const margin = totalRange > 0 ? totalRange * 0.1 : initialCapital * 0.05;
                 const yRange = [minEquity - margin, maxEquity + margin];
                 
+                // Préparer les custom data pour hover (trades ouverts)
+                const customHoverText = openTradesAtDate.map(count => {
+                    return `Open Trades: ${count}`;
+                });
+                
                 const equityTrace = {
                     x: data.equity_data.x,
                     y: equityValues,
@@ -945,7 +1038,9 @@
                     name: 'Equity',
                     line: {color: '#000000', width: 2},
                     fill: 'tozeroy',
-                    fillcolor: 'rgba(0, 0, 0, 0.1)'
+                    fillcolor: 'rgba(0, 0, 0, 0.1)',
+                    text: customHoverText,
+                    hovertemplate: '<b>Date:</b> %{x}<br><b>Equity:</b> $%{y:.2f}<br><b>%{text}</b><extra></extra>'
                 };
                 const equityTraces = [equityTrace];
 
@@ -996,13 +1091,58 @@
                     }]
                 };
                 
-                // 4. Afficher le graphique d'équité
+                // 5. Afficher le graphique d'équité
                 Plotly.newPlot('equity-chart', equityTraces, equityLayout, {responsive: true});
                 
-                // 5. Afficher le graphique de prix (déjà au format Plotly)
+                // 6. Créer et afficher le graphique de drawdown
+                const peak = [];
+                let currentPeak = equityValues[0];
+                equityValues.forEach(val => {
+                    if (val > currentPeak) currentPeak = val;
+                    peak.push(currentPeak);
+                });
+                
+                const drawdownValues = equityValues.map((val, idx) => val - peak[idx]);
+                const drawdownPct = drawdownValues.map((dd, idx) => peak[idx] > 0 ? (dd / peak[idx]) * 100 : 0);
+                
+                const drawdownTrace = {
+                    x: data.equity_data.x,
+                    y: drawdownPct,
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: 'Drawdown',
+                    line: {color: '#ef4444', width: 2},
+                    fill: 'tozeroy',
+                    fillcolor: 'rgba(239, 68, 68, 0.2)',
+                    hovertemplate: '<b>Date:</b> %{x}<br><b>Drawdown:</b> %{y:.2f}%<extra></extra>'
+                };
+                
+                const drawdownLayout = {
+                    title: {
+                        text: 'Drawdown (%)',
+                        font: {size: 18, color: '#000000', family: 'Arial Black'}
+                    },
+                    xaxis: {
+                        title: 'Date',
+                        titlefont: {size: 12, color: '#000000'},
+                        gridcolor: '#e0e0e0'
+                    },
+                    yaxis: {
+                        title: 'Drawdown (%)',
+                        titlefont: {size: 12, color: '#000000'},
+                        gridcolor: '#e0e0e0'
+                    },
+                    paper_bgcolor: '#ffffff',
+                    plot_bgcolor: '#ffffff',
+                    hovermode: 'x unified'
+                };
+                
+                Plotly.newPlot('drawdown-chart', [drawdownTrace], drawdownLayout, {responsive: true});
+                
+                // 7. Afficher le graphique de prix (déjà au format Plotly)
                 Plotly.newPlot('price-chart', data.price_chart.data, data.price_chart.layout, {responsive: true});
                 
-                // 6. Afficher le tableau TradingView des positions individuelles EN DESSOUS
+                // 8. Afficher le tableau TradingView des positions individuelles EN DESSOUS
                 if (data.tradingview_positions && data.tradingview_positions.length > 0) {
                     displayTradingViewTable(data.tradingview_positions);
                 }
