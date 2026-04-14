@@ -764,7 +764,10 @@
             };
 
             try {
-                const response = await fetch('http://localhost:5002/backtest-smartbot-v2-multi', {
+                const apiBase = window.location.hostname === 'localhost'
+                    ? 'http://localhost:5002'
+                    : 'https://kronos-back.onrender.com';
+                const response = await fetch(`${apiBase}/backtest-smartbot-v2-multi`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'

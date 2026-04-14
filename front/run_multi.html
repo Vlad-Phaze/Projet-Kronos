@@ -56,7 +56,10 @@
       };
       document.getElementById('out').textContent = 'Running... this may take a while';
       try{
-        const res = await fetch('/run-multi-backtest', {
+        const apiBase = window.location.hostname === 'localhost'
+          ? 'http://localhost:5002'
+          : 'https://kronos-back.onrender.com';
+        const res = await fetch(`${apiBase}/run-multi-backtest`, {
           method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
         });
         const j = await res.json();
@@ -64,7 +67,7 @@
         document.getElementById('out').textContent = JSON.stringify(j.combined_stats, null, 2);
         // load chart
         const img = document.getElementById('chart');
-        img.src = '/plot-combined-equity?ts=' + Date.now();
+        img.src = `${apiBase}/plot-combined-equity?ts=${Date.now()}`;
       }catch(e){ document.getElementById('out').textContent = String(e); }
     });
   </script>

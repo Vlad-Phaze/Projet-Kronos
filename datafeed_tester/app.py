@@ -4320,11 +4320,12 @@ def backtest_smartbot_v2_multi_endpoint():
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    port = int(os.getenv("PORT", "5002"))
     print("🚀 Démarrage de l'API Kronos...")
-    print("📖 Documentation disponible sur: http://localhost:5002")
+    print(f"📖 Documentation disponible sur: http://localhost:{port}")
     print("🌐 Interface Web disponible sur:")
-    print("   http://localhost:5002/upload_strategy.html")
-    print("   http://localhost:5002/run_multi.html")
+    print(f"   http://localhost:{port}/upload_strategy.html")
+    print(f"   http://localhost:{port}/run_multi.html")
     print("")
     print("🔧 Routes API disponibles:")
     print("   GET  /health")
@@ -4334,4 +4335,4 @@ if __name__ == "__main__":
     print("   POST /report")
     print("   POST /run-multi-backtest")
     print("   POST /backtest-custom-strategy")
-    app.run(debug=False, host="0.0.0.0", port=5002)
+    app.run(debug=False, host="0.0.0.0", port=port)

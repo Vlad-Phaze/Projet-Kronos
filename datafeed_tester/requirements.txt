@@ -11,3 +11,4 @@ pandas-ta>=0.4.67b0
 vectorbt>=0.24.0
 ccxt>=4.0.0
 alpaca-py>=0.25.0
+gunicorn>=23.0.0
