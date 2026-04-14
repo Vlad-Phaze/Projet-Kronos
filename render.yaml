@@ -10,8 +10,9 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.7
 
-  - type: static_site
+  - type: web
     name: kronos-front
+    runtime: static
     rootDir: front
     buildCommand: ""
-    publishDir: .
+    staticPublishPath: .
