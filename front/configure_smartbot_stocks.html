@@ -321,6 +321,51 @@
             display: block;
         }
         
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 24px 40px 0 40px;
+            margin-bottom: 0;
+        }
+        
+        .results-title {
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+        
+        .csv-download-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            background: #1a1a1a;
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .csv-download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+            background: #333333;
+        }
+        
+        .csv-download-btn:active {
+            transform: translateY(0);
+        }
+        
+        .csv-download-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+        
         .stats-grid {
             display: flex;
             flex-wrap: wrap;
@@ -654,6 +699,16 @@
         </div>
 
         <div class="results" id="results">
+            <div class="results-header">
+                <div class="results-title">📊 Résultats du Backtest</div>
+                <button class="csv-download-btn" id="csvDownloadBtn" onclick="downloadCSV()">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Télécharger CSV
+                </button>
+            </div>
+            
             <div class="stats-grid" id="statsGrid">
                 <!-- Stats will be inserted here -->
             </div>
@@ -825,7 +880,114 @@
             };
         }
 
+        // Variable globale pour stocker les données du backtest
+        let currentBacktestData = null;
+
+        function downloadCSV() {
+            console.log('📥 Tentative d\'export CSV...');
+            console.log('currentBacktestData:', currentBacktestData);
+            
+            if (!currentBacktestData) {
+                alert('❌ Aucune donnée de backtest disponible. Veuillez d\'abord lancer un backtest.');
+                return;
+            }
+            
+            console.log('tradingview_positions:', currentBacktestData.tradingview_positions);
+            
+            // Vérifier si les positions existent et ne sont pas vides
+            const positions = currentBacktestData.tradingview_positions;
+            if (!positions || !Array.isArray(positions) || positions.length === 0) {
+                console.error('❌ Aucune position trouvée dans les données');
+                console.log('Structure complète des données:', currentBacktestData);
+                alert('❌ Aucune position trouvée dans ce backtest.\n\nCela peut arriver si:\n• Aucun signal d\'entrée n\'a été détecté\n• La période de test est trop courte\n• Les paramètres sont trop restrictifs');
+                return;
+            }
+
+            console.log(`✅ ${positions.length} positions trouvées, génération du CSV...`);
+            const params = currentBacktestData.parameters || {};
+            const stats = currentBacktestData.statistics || {};
+            
+            // En-têtes CSV
+            const headers = [
+                'Symbol',
+                'Position_Type',
+                'Order_Type',
+                'Entry_Date',
+                'Entry_DateTime',
+                'Entry_Price',
+                'Exit_Date',
+                'Exit_DateTime',
+                'Exit_Price',
+                'Quantity',
+                'Size_USD',
+                'PnL_USD',
+                'PnL_Percent',
+                'Is_Winning',
+                'Deal_Total_SO_Count',
+                'Deal_Total_PnL'
+            ];
+            
+            // Construire les lignes CSV
+            const rows = positions.map(pos => {
+                const entryDate = new Date(pos.entry_time);
+                const exitDate = new Date(pos.exit_time);
+                
+                return [
+                    params.symbol || '',
+                    pos.type || '',
+                    pos.type?.startsWith('BO') ? 'BO' : 'SO',
+                    entryDate.toISOString().split('T')[0],
+                    entryDate.toISOString().replace('T', ' ').split('.')[0],
+                    (pos.entry_price || 0).toFixed(8),
+                    exitDate.toISOString().split('T')[0],
+                    exitDate.toISOString().replace('T', ' ').split('.')[0],
+                    (pos.exit_price || 0).toFixed(8),
+                    (pos.qty || 0).toFixed(8),
+                    (pos.size_usd || 0).toFixed(2),
+                    (pos.pnl || 0).toFixed(2),
+                    (pos.pnl_pct || 0).toFixed(2),
+                    (pos.pnl || 0) > 0 ? 'TRUE' : 'FALSE',
+                    pos.deal_so_count || 0,
+                    (pos.deal_pnl || 0).toFixed(2)
+                ].map(value => {
+                    // Échapper les guillemets et entourer de guillemets si nécessaire
+                    const str = String(value);
+                    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                        return '"' + str.replace(/"/g, '""') + '"';
+                    }
+                    return str;
+                }).join(',');
+            });
+            
+            // Créer le contenu CSV
+            const csvContent = [
+                headers.join(','),
+                ...rows
+            ].join('\n');
+            
+            // Créer un blob et télécharger
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            
+            const symbol = params.symbol || 'backtest';
+            const timestamp = new Date().toISOString().split('T')[0];
+            const filename = `${symbol}_backtest_positions_${timestamp}.csv`;
+            
+            link.setAttribute('href', url);
+            link.setAttribute('download', filename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            console.log(`✅ CSV téléchargé: ${filename} (${positions.length} positions)`);
+        }
+
         function displayResults(data) {
+            // Stocker les données globalement pour l'export CSV
+            currentBacktestData = data;
+            
             console.log('📊 Data reçue:', data);
             console.log('📋 Positions TradingView:', data.tradingview_positions);
             console.log('📊 Statistics complètes:', data.statistics);

@@ -306,6 +306,51 @@
             display: block;
         }
         
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 24px 40px 0 40px;
+            margin-bottom: 0;
+        }
+        
+        .results-title {
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+        
+        .csv-download-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            background: #1a1a1a;
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .csv-download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+            background: #333333;
+        }
+        
+        .csv-download-btn:active {
+            transform: translateY(0);
+        }
+        
+        .csv-download-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+        
         .stats-grid {
             display: flex;
             flex-wrap: wrap;
@@ -607,6 +652,16 @@
         </div>
 
         <div class="results" id="results">
+            <div class="results-header">
+                <div class="results-title">📊 Résultats du Backtest Multi-Stocks</div>
+                <button class="csv-download-btn" id="csvDownloadBtn" onclick="downloadMultiAssetCSV()">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Télécharger CSV (Tous les Stocks)
+                </button>
+            </div>
+            
             <div class="stats-grid" id="statsGrid">
                 <!-- Stats will be inserted here -->
             </div>
@@ -794,7 +849,170 @@
             };
         }
 
+        // Variable globale pour stocker les données du backtest multi-stocks
+        let currentMultiAssetBacktestData = null;
+
+        function downloadMultiAssetCSV() {
+            try {
+                console.log('📥 Tentative d\'export CSV multi-stocks...');
+                console.log('currentMultiAssetBacktestData:', currentMultiAssetBacktestData);
+            
+            if (!currentMultiAssetBacktestData) {
+                alert('❌ Aucune donnée de backtest disponible. Veuillez d\'abord lancer un backtest.');
+                return;
+            }
+            
+            // CORRECTION: Utiliser per_asset_stats au lieu de per_asset_charts
+            const perAssetStats = currentMultiAssetBacktestData.per_asset_stats;
+            if (!perAssetStats) {
+                console.error('❌ Aucun per_asset_stats trouvé');
+                console.log('Structure complète des données:', currentMultiAssetBacktestData);
+                alert('❌ Aucun stock trouvé dans ce backtest.');
+                return;
+            }
+
+            const allPositions = [];
+            
+            // Collecter toutes les positions de tous les stocks depuis per_asset_stats
+            Object.entries(perAssetStats).forEach(([symbol, assetStats]) => {
+                console.log(`🔍 Vérification ${symbol}:`, assetStats);
+                
+                // Les positions sont dans individual_positions
+                if (assetStats.individual_positions && Array.isArray(assetStats.individual_positions)) {
+                    console.log(`  ✅ ${symbol}: ${assetStats.individual_positions.length} positions trouvées`);
+                    assetStats.individual_positions.forEach(pos => {
+                        allPositions.push({
+                            ...pos,
+                            symbol: symbol
+                        });
+                    });
+                } else {
+                    console.log(`  ⚠️ ${symbol}: Pas de individual_positions`);
+                }
+            });
+            
+            console.log(`📊 Total positions collectées: ${allPositions.length}`);
+            
+            if (allPositions.length === 0) {
+                console.error('❌ Aucune position trouvée après collecte');
+                alert('❌ Aucune position trouvée dans ce backtest.\n\nCela peut arriver si:\n• Aucun signal d\'entrée n\'a été détecté\n• La période de test est trop courte\n• Les paramètres sont trop restrictifs');
+                return;
+            }
+            
+            // Trier par date d'entrée
+            allPositions.sort((a, b) => {
+                const dateA = new Date(a.entry_time);
+                const dateB = new Date(b.entry_time);
+                return dateA - dateB;
+            });
+            
+            // En-têtes CSV
+            const headers = [
+                'Symbol',
+                'Position_Type',
+                'Order_Type',
+                'Status',
+                'Entry_Date',
+                'Entry_DateTime',
+                'Entry_Price',
+                'Exit_Date',
+                'Exit_DateTime',
+                'Exit_Price',
+                'Quantity',
+                'Size_USD',
+                'PnL_USD',
+                'PnL_Percent',
+                'Is_Winning',
+                'Deal_Total_SO_Count',
+                'Deal_Total_PnL'
+            ];
+            
+            // Construire les lignes CSV
+            console.log('🔨 Construction du CSV avec', allPositions.length, 'positions');
+            console.log('📝 Exemple de position:', allPositions[0]);
+            
+            // Fonction helper pour formater les dates de façon sécurisée
+            const formatDate = (dateStr) => {
+                if (!dateStr) return 'N/A';
+                const d = new Date(dateStr);
+                if (isNaN(d.getTime())) return 'N/A';
+                return d.toISOString().split('T')[0];
+            };
+            
+            const formatDateTime = (dateStr) => {
+                if (!dateStr) return 'N/A';
+                const d = new Date(dateStr);
+                if (isNaN(d.getTime())) return 'N/A';
+                return d.toISOString().replace('T', ' ').split('.')[0];
+            };
+            
+            const rows = allPositions.map(pos => {
+                // Déterminer si la position est ouverte ou fermée
+                const isClosed = pos.exit_time && pos.exit_price;
+                const status = isClosed ? 'CLOSED' : 'OPEN';
+                
+                return [
+                    pos.symbol || '',
+                    pos.type || '',
+                    pos.type?.startsWith('BO') ? 'BO' : 'SO',
+                    status,
+                    formatDate(pos.entry_time),
+                    formatDateTime(pos.entry_time),
+                    (pos.entry_price || 0).toFixed(8),
+                    isClosed ? formatDate(pos.exit_time) : 'OPEN',
+                    isClosed ? formatDateTime(pos.exit_time) : 'OPEN',
+                    isClosed ? (pos.exit_price || 0).toFixed(8) : 'OPEN',
+                    (pos.qty || 0).toFixed(8),
+                    (pos.size_usd || 0).toFixed(2),
+                    (pos.pnl || 0).toFixed(2),
+                    (pos.pnl_pct || 0).toFixed(2),
+                    (pos.pnl || 0) > 0 ? 'TRUE' : 'FALSE',
+                    pos.deal_so_count || 0,
+                    (pos.deal_pnl || 0).toFixed(2)
+                ].map(value => {
+                    // Échapper les guillemets et entourer de guillemets si nécessaire
+                    const str = String(value);
+                    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                        return '"' + str.replace(/"/g, '""') + '"';
+                    }
+                    return str;
+                }).join(',');
+            });
+            
+            // Créer le contenu CSV
+            const csvContent = [
+                headers.join(','),
+                ...rows
+            ].join('\n');
+            
+            // Créer un blob et télécharger
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            
+            const timestamp = new Date().toISOString().split('T')[0];
+            const filename = `multi_stocks_backtest_positions_${timestamp}.csv`;
+            
+            link.setAttribute('href', url);
+            link.setAttribute('download', filename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            const uniqueSymbols = new Set(allPositions.map(p => p.symbol));
+            console.log(`✅ CSV téléchargé: ${filename}`);
+            console.log(`   ${allPositions.length} positions de ${uniqueSymbols.size} stocks`);
+            } catch (error) {
+                console.error('❌ ERREUR lors de la génération du CSV:', error);
+                console.error('Stack trace:', error.stack);
+                alert(`❌ Erreur lors de la génération du CSV:\n${error.message}`);
+            }
+        }
+
         function displayResults(data) {
+            // Stocker les données globalement pour l'export CSV
+            currentMultiAssetBacktestData = data;
             const statsGrid = document.getElementById('statsGrid');
             const stats = buildCombinedDisplayStats(data);
             const perAsset = data.per_asset_stats || {};

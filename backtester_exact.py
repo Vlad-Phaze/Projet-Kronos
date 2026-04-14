@@ -1183,6 +1183,228 @@ def export_tradingview_csv(df_trades: pd.DataFrame, filename: str = "backtest_tr
     return df_export
 
 
+def export_all_positions_detailed_csv(
+    results_dict: Dict[str, Tuple[pd.DataFrame, pd.Series, Dict]], 
+    filename: str = "backtest_all_positions_detailed.csv"
+):
+    """
+    Export TOUTES les positions individuelles (BO et SO) de TOUS les assets
+    dans un seul fichier CSV trié par date.
+    
+    Parfait pour voir jour par jour quel asset a pris un BO ou un SO.
+    
+    Args:
+        results_dict: Dictionnaire {symbole: (df_trades, equity, stats)}
+        filename: Nom du fichier CSV de sortie
+    
+    Returns:
+        DataFrame avec toutes les positions
+    """
+    all_positions = []
+    
+    for symbol, (df_trades, _, stats) in results_dict.items():
+        if df_trades.empty:
+            continue
+        
+        # Extraire toutes les positions individuelles de tous les trades
+        for idx, trade in df_trades.iterrows():
+            positions = trade.get("individual_positions") if hasattr(trade, "get") else None
+            if not isinstance(positions, list) or not positions:
+                continue
+            
+            # Ajouter chaque position (BO ou SO)
+            for pos in positions:
+                position_row = {
+                    # Identification
+                    "Symbol": symbol,
+                    "Position_Type": pos['type'],  # BO_0, SO_1, SO_2, etc.
+                    "Order_Type": "BO" if pos['type'].startswith("BO") else "SO",
+                    "SO_Number": int(pos['type'].split('_')[1]) if '_' in pos['type'] else 0,
+                    
+                    # Dates
+                    "Entry_Date": pos['entry_time'].strftime('%Y-%m-%d'),
+                    "Entry_DateTime": pos['entry_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                    "Exit_Date": trade['exit_time'].strftime('%Y-%m-%d'),
+                    "Exit_DateTime": trade['exit_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                    
+                    # Prix
+                    "Entry_Price": pos['entry_price'],
+                    "Exit_Price": pos['exit_price'],
+                    
+                    # Taille
+                    "Quantity": pos['qty'],
+                    "Size_USD": pos['size_usd'],
+                    
+                    # P&L
+                    "PnL_USD": pos['pnl'],
+                    "PnL_Percent": pos['pnl_pct'],
+                    "Is_Winning": pos.get('is_win', pos['pnl'] > 0),
+                    
+                    # Informations du deal complet
+                    "Deal_Entry_Date": trade['entry_time'].strftime('%Y-%m-%d'),
+                    "Deal_Avg_Entry": trade['avg_entry_price'],
+                    "Deal_Total_SO_Count": trade['so_count'],
+                    "Deal_Total_Invested": trade['total_invested'],
+                    "Deal_Total_PnL": trade['pnl'],
+                    "Deal_Exit_Reason": trade.get('reason', 'TP'),
+                }
+                
+                all_positions.append(position_row)
+    
+    if not all_positions:
+        print("⚠️ Aucune position à exporter.")
+        return pd.DataFrame()
+    
+    # Créer le DataFrame et trier par date d'entrée
+    df_all_positions = pd.DataFrame(all_positions)
+    df_all_positions = df_all_positions.sort_values('Entry_DateTime')
+    
+    # Exporter en CSV
+    df_all_positions.to_csv(filename, index=False)
+    
+    # Statistiques d'export
+    total_positions = len(df_all_positions)
+    total_bo = len(df_all_positions[df_all_positions['Order_Type'] == 'BO'])
+    total_so = len(df_all_positions[df_all_positions['Order_Type'] == 'SO'])
+    total_winning = len(df_all_positions[df_all_positions['Is_Winning'] == True])
+    
+    print("="*80)
+    print(f"✅ EXPORT CSV DÉTAILLÉ COMPLET")
+    print("="*80)
+    print(f"📄 Fichier: {filename}")
+    print(f"📊 Total positions: {total_positions}")
+    print(f"   • Base Orders (BO): {total_bo}")
+    print(f"   • Safety Orders (SO): {total_so}")
+    print(f"   • Positions gagnantes: {total_winning} ({total_winning/total_positions*100:.1f}%)")
+    print(f"🎯 Assets: {df_all_positions['Symbol'].nunique()}")
+    print(f"📅 Période: {df_all_positions['Entry_Date'].min()} → {df_all_positions['Exit_Date'].max()}")
+    print("="*80)
+    
+    return df_all_positions
+
+
+def export_positions_by_day_summary(
+    results_dict: Dict[str, Tuple[pd.DataFrame, pd.Series, Dict]], 
+    filename: str = "backtest_positions_by_day.csv"
+):
+    """
+    Export un résumé quotidien montrant combien de BO et SO ont été placés chaque jour,
+    par asset.
+    
+    Args:
+        results_dict: Dictionnaire {symbole: (df_trades, equity, stats)}
+        filename: Nom du fichier CSV de sortie
+    
+    Returns:
+        DataFrame avec le résumé quotidien
+    """
+    all_daily_positions = []
+    
+    for symbol, (df_trades, _, stats) in results_dict.items():
+        if df_trades.empty:
+            continue
+        
+        # Extraire toutes les positions individuelles
+        for idx, trade in df_trades.iterrows():
+            positions = trade.get("individual_positions") if hasattr(trade, "get") else None
+            if not isinstance(positions, list) or not positions:
+                continue
+            
+            for pos in positions:
+                entry_date = pos['entry_time'].strftime('%Y-%m-%d')
+                order_type = "BO" if pos['type'].startswith("BO") else "SO"
+                
+                all_daily_positions.append({
+                    "Date": entry_date,
+                    "Symbol": symbol,
+                    "Order_Type": order_type,
+                    "Position_Type": pos['type'],
+                    "Entry_Price": pos['entry_price'],
+                    "Size_USD": pos['size_usd'],
+                })
+    
+    if not all_daily_positions:
+        print("⚠️ Aucune position à exporter.")
+        return pd.DataFrame()
+    
+    # Créer le DataFrame
+    df_daily = pd.DataFrame(all_daily_positions)
+    
+    # Créer un résumé par jour et par symbole
+    summary = df_daily.groupby(['Date', 'Symbol', 'Order_Type']).agg({
+        'Position_Type': 'count',
+        'Size_USD': 'sum',
+        'Entry_Price': 'mean'
+    }).rename(columns={
+        'Position_Type': 'Count',
+        'Size_USD': 'Total_Size_USD',
+        'Entry_Price': 'Avg_Entry_Price'
+    }).reset_index()
+    
+    # Pivoter pour avoir BO et SO en colonnes séparées
+    summary_pivot = summary.pivot_table(
+        index=['Date', 'Symbol'],
+        columns='Order_Type',
+        values=['Count', 'Total_Size_USD'],
+        fill_value=0
+    ).reset_index()
+    
+    # Aplatir les colonnes multi-niveaux
+    summary_pivot.columns = [
+        f"{col[1]}_{col[0]}" if col[1] else col[0] 
+        for col in summary_pivot.columns
+    ]
+    
+    # Renommer les colonnes pour plus de clarté
+    column_mapping = {
+        'Date': 'Date',
+        'Symbol': 'Symbol',
+        'BO_Count': 'BO_Count',
+        'SO_Count': 'SO_Count',
+        'BO_Total_Size_USD': 'BO_Total_Size_USD',
+        'SO_Total_Size_USD': 'SO_Total_Size_USD',
+    }
+    
+    # Nettoyer les noms de colonnes
+    for old_col in summary_pivot.columns:
+        if old_col not in column_mapping.values() and old_col not in ['Date', 'Symbol']:
+            if 'BO' in old_col and 'Count' in old_col:
+                summary_pivot = summary_pivot.rename(columns={old_col: 'BO_Count'})
+            elif 'SO' in old_col and 'Count' in old_col:
+                summary_pivot = summary_pivot.rename(columns={old_col: 'SO_Count'})
+            elif 'BO' in old_col and 'Total_Size_USD' in old_col:
+                summary_pivot = summary_pivot.rename(columns={old_col: 'BO_Total_Size_USD'})
+            elif 'SO' in old_col and 'Total_Size_USD' in old_col:
+                summary_pivot = summary_pivot.rename(columns={old_col: 'SO_Total_Size_USD'})
+    
+    # S'assurer que toutes les colonnes existent
+    for col in ['BO_Count', 'SO_Count', 'BO_Total_Size_USD', 'SO_Total_Size_USD']:
+        if col not in summary_pivot.columns:
+            summary_pivot[col] = 0
+    
+    # Ajouter une colonne Total
+    summary_pivot['Total_Orders'] = summary_pivot['BO_Count'] + summary_pivot['SO_Count']
+    summary_pivot['Total_Size_USD'] = summary_pivot['BO_Total_Size_USD'] + summary_pivot['SO_Total_Size_USD']
+    
+    # Trier par date
+    summary_pivot = summary_pivot.sort_values('Date')
+    
+    # Exporter
+    summary_pivot.to_csv(filename, index=False)
+    
+    print("="*80)
+    print(f"✅ EXPORT RÉSUMÉ QUOTIDIEN")
+    print("="*80)
+    print(f"📄 Fichier: {filename}")
+    print(f"📅 Jours de trading: {summary_pivot['Date'].nunique()}")
+    print(f"🎯 Assets: {summary_pivot['Symbol'].nunique()}")
+    print(f"📊 Total BO placés: {int(summary_pivot['BO_Count'].sum())}")
+    print(f"📊 Total SO placés: {int(summary_pivot['SO_Count'].sum())}")
+    print("="*80)
+    
+    return summary_pivot
+
+
 if __name__ == "__main__":
     # Test du backtester SmartBot V2
     import yfinance as yf
