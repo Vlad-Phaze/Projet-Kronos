@@ -6,6 +6,8 @@ Utilise fetcher.py pour la récupération multi-sources et backtester amélioré
 
 import sys
 import os
+import gc
+import time
 
 # Configuration UTF-8 pour Windows
 if sys.platform == 'win32':
@@ -13,25 +15,7 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-import importlib
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-# Forcer le rechargement COMPLET du module backtester
-print("🔄 Suppression complète du module backtester du cache...")
-modules_to_reload = ['backtester', 'dca_strategy', 'backtester_exact']
-for module in modules_to_reload:
-    if module in sys.modules:
-        del sys.modules[module]
-        print(f"   ✅ Module {module} supprimé")
-
-print("📥 Import FRAIS du backtester SmartBot V2...")
-backtest_smartbot_v2 = None
-try:
-    import backtester_exact
-    from backtester_exact import backtest_smartbot_v2
-    print("✅ Backtester SmartBot V2 importé avec succès")
-except Exception as e:
-    print(f"⚠️ backtester_exact import failed (continuing without it): {e}")
 
 import json
 import uuid
@@ -54,10 +38,8 @@ import yfinance as yf
 from flask import Flask, request, jsonify, send_file, make_response
 from flask_cors import CORS
 
-# Import du backtester exact (après rechargement forcé)
-import importlib
+# Import du backtester exact (sans reload forcé pour éviter les pics RAM)
 import backtester_exact
-importlib.reload(backtester_exact)  # Force reload pour nouvelles signatures
 from backtester_exact import ParametresDCA_SmartBotV2, backtest_smartbot_v2
 
 # Import du fetcher - Binance uniquement pour meilleure performance
@@ -126,6 +108,60 @@ BACKTEST_STORE = {}  # {run_id: {"results": dict, "images": dict, "data": df}}
 app = Flask(__name__)
 CORS(app)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+
+# Garde-fous anti-OOM (adaptés à Render Starter 512MB)
+MAX_MULTI_ASSETS = int(os.getenv("MAX_MULTI_ASSETS", "20"))
+MAX_BARS_PER_ASSET = int(os.getenv("MAX_BARS_PER_ASSET", "4000"))
+MAX_TOTAL_BARS = int(os.getenv("MAX_TOTAL_BARS", "50000"))
+BINANCE_CACHE_TTL_SECONDS = int(os.getenv("BINANCE_CACHE_TTL_SECONDS", "600"))
+_BINANCE_FETCH_CACHE: Dict[str, Any] = {}
+
+try:
+    import resource  # linux/unix (Render)
+except Exception:
+    resource = None
+
+
+def get_memory_mb() -> Optional[float]:
+    """Retourne la mémoire RSS du process en MB si disponible."""
+    if resource is None:
+        return None
+    try:
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # Linux = KB, macOS = bytes
+        if sys.platform == "darwin":
+            return float(rss) / (1024 * 1024)
+        return float(rss) / 1024.0
+    except Exception:
+        return None
+
+
+def log_perf(stage: str, t0: float) -> None:
+    elapsed = time.perf_counter() - t0
+    mem = get_memory_mb()
+    if mem is None:
+        print(f"⏱️ {stage}: {elapsed:.2f}s")
+    else:
+        print(f"⏱️ {stage}: {elapsed:.2f}s | RAM ~ {mem:.1f} MB")
+
+
+def fetch_binance_only_cached(**kwargs):
+    """Cache court pour éviter de refetch les mêmes OHLCV à répétition."""
+    cache_key = json.dumps(kwargs, sort_keys=True, default=str)
+    now = time.time()
+    cached = _BINANCE_FETCH_CACHE.get(cache_key)
+    if cached and (now - cached["ts"]) <= BINANCE_CACHE_TTL_SECONDS:
+        print(f"🧠 Cache OHLCV hit ({BINANCE_CACHE_TTL_SECONDS}s)")
+        return cached["value"]
+
+    result = fetch_binance_only(**kwargs)
+    _BINANCE_FETCH_CACHE[cache_key] = {"ts": now, "value": result}
+
+    # Limiter la taille du cache en mémoire
+    if len(_BINANCE_FETCH_CACHE) > 8:
+        oldest = min(_BINANCE_FETCH_CACHE.items(), key=lambda item: item[1]["ts"])[0]
+        _BINANCE_FETCH_CACHE.pop(oldest, None)
+    return result
 
 # Import helper to run multi-asset vectorbt backtests (uses project fetcher)
 try:
@@ -1980,12 +2016,11 @@ def home():
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Route 1: Vérifier que le service tourne"""
+    """Healthcheck ultra léger (aucun calcul)."""
     return jsonify({
         "status": "ok",
         "version": "0.1.0",
-        "timestamp": datetime.utcnow().isoformat(),
-        "features": ["ingest-score", "backtest", "report", "strategies"]
+        "timestamp": datetime.utcnow().isoformat()
     })
 
 @app.route("/strategies", methods=["GET"])
@@ -2145,6 +2180,7 @@ def ingest_score():
 @app.route("/backtest", methods=["POST"])
 def backtest():
     """Route 3: Lancer un backtest DCA avec votre backtester personnalisé"""
+    request_t0 = time.perf_counter()
     try:
         data = request.get_json()
         if not data:
@@ -2164,15 +2200,17 @@ def backtest():
         # Récupération des données via votre fetcher
         print("📥 Récupération des données via le fetcher personnalisé...")
         try:
+            fetch_t0 = time.perf_counter()
             # Conversion du symbole pour le fetcher (BTC-USD -> BTC)
             base_symbol = symbol.split('-')[0] if '-' in symbol else symbol.replace('/USDT', '').replace('/USD', '')
             
             # Utilisation de Binance uniquement (plus rapide)
-            agg, detail, data = fetch_binance_only(
+            agg, detail, data = fetch_binance_only_cached(
                 bases=[base_symbol],  # Ex: ["BTC"]
                 timeframe="1d",
                 lookback_days=365  # 1 an de données
             )
+            log_perf("fetch-single-asset", fetch_t0)
             
             # Vérification que les données ont été récupérées
             if agg is None or agg.empty:
@@ -2681,6 +2719,7 @@ def backtest():
         
         # Conversion des pandas objects en types JSON-sérialisables
         response_data = convert_pandas_to_json(response_data)
+        log_perf("backtest-single-total", request_t0)
         
         return jsonify(response_data)
         
@@ -2689,66 +2728,8 @@ def backtest():
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"Erreur backtest: {str(e)}"}), 500
-        equity_oos = result_oos._equity_curve['Equity'] if hasattr(result_oos, '_equity_curve') else pd.Series([10000])
-        
-        # Combinaison des equity curves
-        equity_full = pd.concat([equity_is, equity_oos])
-        
-        # Graphiques
-        equity_chart_path = create_equity_chart(equity_full, f"Courbe d'Equity - {symbol}")
-        drawdown_chart_path = create_drawdown_chart(equity_full, f"Drawdown - {symbol}")
-        
-        # Génération du run_id et stockage
-        run_id = str(uuid.uuid4())
-        
-        BACKTEST_STORE[run_id] = {
-            "results": {
-                "symbol": symbol,
-                "dataset_id": dataset_id,
-                "strategy_params": strategy_config,
-                "is_metrics": metrics_is,
-                "oos_metrics": metrics_oos,
-                "oos_warning": oos_warning,
-                "split_date": str(df.index[split_point]) if split_point < len(df) else "",
-                "created_at": datetime.utcnow().isoformat()
-            },
-            "images": {
-                "equity_chart": equity_chart_path,
-                "drawdown_chart": drawdown_chart_path
-            },
-            "data": {
-                "full_df": df,
-                "equity_series": equity_full,
-                "trades_is": result_is._trades if hasattr(result_is, '_trades') else pd.DataFrame(),
-                "trades_oos": result_oos._trades if hasattr(result_oos, '_trades') else pd.DataFrame()
-            }
-        }
-        
-        # Réponse
-        return jsonify({
-            "run_id": run_id,
-            "summary": {
-                "symbol": symbol,
-                "is_return": round(metrics_is["is_return_pct"], 2),
-                "oos_return": round(metrics_oos["oos_return_pct"], 2),
-                "is_sharpe": round(metrics_is["is_sharpe"], 3),
-                "oos_sharpe": round(metrics_oos["oos_sharpe"], 3),
-                "total_trades": metrics_is["is_trades"] + metrics_oos["oos_trades"],
-                "oos_warning": oos_warning
-            },
-            "images": {
-                "equity_chart": f"/download-image/{run_id}/equity",
-                "drawdown_chart": f"/download-image/{run_id}/drawdown"
-            },
-            "details": {
-                "is_metrics": metrics_is,
-                "oos_metrics": metrics_oos,
-                "strategy_config": strategy_config
-            }
-        })
-        
-    except Exception as e:
-        return jsonify({"error": f"Erreur backtest: {str(e)}"}), 500
+    finally:
+        gc.collect()
 
 @app.route("/report", methods=["POST"])
 def report():
@@ -3997,6 +3978,7 @@ def backtest_smartbot_v2_multi_endpoint():
     """
     Endpoint pour backtester SmartBot V2 Multi-Asset avec gestion de portfolio
     """
+    request_t0 = time.perf_counter()
     try:
         data = request.json
         
@@ -4004,6 +3986,14 @@ def backtest_smartbot_v2_multi_endpoint():
         assets = data.get('assets', ['BTC', 'ETH'])
         if isinstance(assets, str):
             assets = [a.strip() for a in assets.split(',')]
+        assets = [a for a in assets if a]
+        if len(assets) > MAX_MULTI_ASSETS:
+            return jsonify({
+                "error": (
+                    f"Trop d'assets demandés ({len(assets)}). "
+                    f"Limite serveur: {MAX_MULTI_ASSETS}."
+                )
+            }), 400
         
         quote = data.get('quote', 'USD')
         exchange_name = data.get('exchange', 'binance')
@@ -4056,6 +4046,7 @@ def backtest_smartbot_v2_multi_endpoint():
         # ==============================================
         # ALPACA (US STOCKS) - Téléchargement direct pour chaque stock
         # ==============================================
+        fetch_t0 = time.perf_counter()
         if exchange_name.lower() == "alpaca":
             print(f"📈 Mode STOCKS US - Téléchargement {len(assets)} stocks via Alpaca")
             
@@ -4091,19 +4082,22 @@ def backtest_smartbot_v2_multi_endpoint():
         # ==============================================
         else:
             print(f"🔄 Téléchargement des données pour {len(assets)} assets depuis Binance...")
-            agg, detail, fetch_data = fetch_binance_only(
+            agg, detail, fetch_data = fetch_binance_only_cached(
                 bases=assets,
                 timeframe=tf,
                 lookback_days=365,
                 since_ms=since_ms,
                 until_ms=until_ms
             )
+        log_perf("fetch-data", fetch_t0)
         
         if not fetch_data.get("__FINAL__"):
             return jsonify({"error": "Aucune donnée récupérée"}), 400
         
         # Préparer les DataFrames de tous les assets
         assets_prepared = {}
+        total_bars = 0
+        prep_t0 = time.perf_counter()
         
         print(f"\n{'='*80}")
         print(f"🚀 PRÉPARATION MULTI-ASSET BACKTEST")
@@ -4150,21 +4144,41 @@ def backtest_smartbot_v2_multi_endpoint():
             if df.empty:
                 print(f"⚠️ {asset}: Aucune donnée après filtrage")
                 continue
+
+            if len(df) > MAX_BARS_PER_ASSET:
+                print(
+                    f"⚠️ {asset}: {len(df)} barres > limite {MAX_BARS_PER_ASSET}, "
+                    f"troncature aux plus récentes"
+                )
+                df = df.iloc[-MAX_BARS_PER_ASSET:]
+
+            total_bars += len(df)
+            if total_bars > MAX_TOTAL_BARS:
+                return jsonify({
+                    "error": (
+                        f"Charge trop lourde ({total_bars} barres cumulées). "
+                        f"Limite serveur: {MAX_TOTAL_BARS}. "
+                        f"Réduis le nombre d'assets ou la période."
+                    )
+                }), 400
             
             assets_prepared[asset] = df
             print(f"✅ {asset}: {len(df)} barres")
         
         if not assets_prepared:
             return jsonify({"error": "Aucun asset disponible après préparation"}), 400
+        log_perf("prepare-data", prep_t0)
         
         # Exécuter le backtest multi-portfolio avec limitation de positions
         from backtester_exact import backtest_smartbot_v2_multi_portfolio
+        bt_t0 = time.perf_counter()
         
         per_asset_trades, per_asset_equity, per_asset_stats, combined_equity, portfolio_stats = backtest_smartbot_v2_multi_portfolio(
             assets_prepared,
             params,
             max_active_trades
         )
+        log_perf("run-backtest", bt_t0)
         
         # DEBUG: Vérifier que les positions ont trade_id dans le multi-asset
         first_asset_with_positions = None
@@ -4303,8 +4317,14 @@ def backtest_smartbot_v2_multi_endpoint():
             "combined_stats": combined_stats,
             "per_asset_stats": per_asset_stats,
             "combined_equity": combined_equity_list,
-            "per_asset_charts": per_asset_charts
+            "per_asset_charts": per_asset_charts,
+            "performance": {
+                "total_seconds": round(time.perf_counter() - request_t0, 3),
+                "memory_mb": round(get_memory_mb() or 0, 1),
+                "total_bars": total_bars
+            }
         }
+        log_perf("total-request", request_t0)
         
         return jsonify(convert_pandas_to_json(response))
         
@@ -4313,6 +4333,9 @@ def backtest_smartbot_v2_multi_endpoint():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+    finally:
+        # Libération explicite des objets lourds après chaque requête
+        gc.collect()
 
 
 # -----------------------------------------------------------------------------
