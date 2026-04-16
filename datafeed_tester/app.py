@@ -109,10 +109,6 @@ app = Flask(__name__)
 CORS(app)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 
-# Garde-fous anti-OOM (adaptés à Render Starter 512MB)
-MAX_MULTI_ASSETS = int(os.getenv("MAX_MULTI_ASSETS", "20"))
-MAX_BARS_PER_ASSET = int(os.getenv("MAX_BARS_PER_ASSET", "4000"))
-MAX_TOTAL_BARS = int(os.getenv("MAX_TOTAL_BARS", "50000"))
 BINANCE_CACHE_TTL_SECONDS = int(os.getenv("BINANCE_CACHE_TTL_SECONDS", "600"))
 _BINANCE_FETCH_CACHE: Dict[str, Any] = {}
 
@@ -3987,13 +3983,6 @@ def backtest_smartbot_v2_multi_endpoint():
         if isinstance(assets, str):
             assets = [a.strip() for a in assets.split(',')]
         assets = [a for a in assets if a]
-        if len(assets) > MAX_MULTI_ASSETS:
-            return jsonify({
-                "error": (
-                    f"Trop d'assets demandés ({len(assets)}). "
-                    f"Limite serveur: {MAX_MULTI_ASSETS}."
-                )
-            }), 400
         
         quote = data.get('quote', 'USD')
         exchange_name = data.get('exchange', 'binance')
@@ -4096,7 +4085,6 @@ def backtest_smartbot_v2_multi_endpoint():
         
         # Préparer les DataFrames de tous les assets
         assets_prepared = {}
-        total_bars = 0
         prep_t0 = time.perf_counter()
         
         print(f"\n{'='*80}")
@@ -4144,23 +4132,6 @@ def backtest_smartbot_v2_multi_endpoint():
             if df.empty:
                 print(f"⚠️ {asset}: Aucune donnée après filtrage")
                 continue
-
-            if len(df) > MAX_BARS_PER_ASSET:
-                print(
-                    f"⚠️ {asset}: {len(df)} barres > limite {MAX_BARS_PER_ASSET}, "
-                    f"troncature aux plus récentes"
-                )
-                df = df.iloc[-MAX_BARS_PER_ASSET:]
-
-            total_bars += len(df)
-            if total_bars > MAX_TOTAL_BARS:
-                return jsonify({
-                    "error": (
-                        f"Charge trop lourde ({total_bars} barres cumulées). "
-                        f"Limite serveur: {MAX_TOTAL_BARS}. "
-                        f"Réduis le nombre d'assets ou la période."
-                    )
-                }), 400
             
             assets_prepared[asset] = df
             print(f"✅ {asset}: {len(df)} barres")
@@ -4321,7 +4292,7 @@ def backtest_smartbot_v2_multi_endpoint():
             "performance": {
                 "total_seconds": round(time.perf_counter() - request_t0, 3),
                 "memory_mb": round(get_memory_mb() or 0, 1),
-                "total_bars": total_bars
+                "total_bars": int(sum(len(df) for df in assets_prepared.values()))
             }
         }
         log_perf("total-request", request_t0)
