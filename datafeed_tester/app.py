@@ -3683,6 +3683,7 @@ def backtest_smartbot_v2_endpoint():
             # Take Profit Settings
             take_profit=float(data.get('take_profit', 1.5)),
             tp_type=data.get('tp_type', 'From Average Entry'),
+            max_hold_time_days=int(data.get('max_hold_time_days', 5)),
             
             # Indicator Settings: RSI
             rsi_length=int(data.get('rsi_length', 2)),
@@ -4009,6 +4010,7 @@ def backtest_smartbot_v2_multi_endpoint():
             atr_mult_step_scale=float(data.get('atr_step_scale', 1.2)),
             take_profit=float(data.get('take_profit', 1.5)),
             tp_type=data.get('tp_type', 'From Average Entry'),
+            max_hold_time_days=int(data.get('max_hold_time_days', 5)),
             rsi_length=int(data.get('rsi_length', 2)),
             dsc_rsi_threshold_low=int(data.get('rsi_threshold', 3)),
             mfi_length=int(data.get('mfi_length', 14)),
@@ -4307,6 +4309,442 @@ def backtest_smartbot_v2_multi_endpoint():
     finally:
         # Libération explicite des objets lourds après chaque requête
         gc.collect()
+
+
+# -----------------------------------------------------------------------------
+# ENDPOINTS D'OPTIMISATION DE PARAMÈTRES
+# -----------------------------------------------------------------------------
+
+@app.route('/optimize-single-parameter', methods=['POST'])
+def optimize_single_parameter():
+    """
+    Optimise un seul paramètre de la stratégie SmartBot V2
+    
+    Body JSON requis:
+    {
+        "symbol": "BTC",
+        "quote": "USD",
+        "exchange": "binance",
+        "timeframe": "1d",
+        "start_date": "2024-01-01",
+        "end_date": "2025-01-01",
+        "parameter": {
+            "name": "rsi_length",
+            "min_value": 2,
+            "max_value": 10,
+            "step": 1,
+            "type": "int"
+        },
+        "base_params": { ... }  // Paramètres de base SmartBot V2
+    }
+    """
+    try:
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from optimizer import StrategyOptimizer, ParameterRange
+        from backtester_exact import ParametresDCA_SmartBotV2
+        
+        data = request.json
+        
+        # Récupération des données de marché
+        symbol = data.get('symbol', 'BTC')
+        quote = data.get('quote', 'USD')
+        exchange_name = data.get('exchange', 'binance')
+        timeframe = data.get('timeframe', '1d')
+        start_date = data.get('start_date', '2024-01-01')
+        end_date = data.get('end_date', '2025-01-01')
+        
+        print(f"🔍 Optimisation de paramètre: {symbol}-{quote} sur {exchange_name}")
+        
+        # Télécharger les données de prix
+        from datetime import datetime as dt, timezone
+        start_dt = dt.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        end_dt = dt.strptime(end_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        since_ms = int(start_dt.timestamp() * 1000)
+        until_ms = int(end_dt.timestamp() * 1000)
+        
+        timeframe_map = {'1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d'}
+        tf = timeframe_map.get(timeframe, '1d')
+        
+        # ==============================================
+        # ALPACA (US STOCKS) - Traitement direct
+        # ==============================================
+        if exchange_name.lower() == "alpaca":
+            print(f"📈 Mode STOCKS US - Téléchargement {symbol} via Alpaca")
+            
+            try:
+                df = fetch_ohlcv(
+                    exchange="alpaca",
+                    symbol=symbol,
+                    timeframe=tf,
+                    since_ms=since_ms,
+                    until_ms=until_ms
+                )
+                
+                if df.empty:
+                    print(f"❌ Aucune donnée Alpaca pour {symbol}")
+                    return jsonify({"error": f"Aucune donnée disponible pour le stock {symbol} sur Alpaca."}), 400
+                
+                print(f"✅ {len(df)} bougies téléchargées depuis Alpaca")
+                
+                if 'date' in df.columns:
+                    df = df.set_index('date')
+                elif 'timestamp' in df.columns:
+                    df.index = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+                    df = df.drop('timestamp', axis=1, errors='ignore')
+                
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+                
+                df = df.drop(['exchange', 'pair'], axis=1, errors='ignore')
+                if 'timestamp' in df.columns:
+                    df = df.drop('timestamp', axis=1)
+                
+                df = df.rename(columns={
+                    'open': 'Open',
+                    'high': 'High',
+                    'low': 'Low',
+                    'close': 'Close',
+                    'volume': 'Volume'
+                })
+                
+            except Exception as e:
+                print(f"❌ Erreur Alpaca: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({"error": f"Erreur Alpaca: {str(e)}"}), 500
+        
+        # ==============================================
+        # CRYPTO (BINANCE, COINBASE, etc.) - Multi-sources
+        # ==============================================
+        else:
+            print(f"🔄 Téléchargement {symbol} via fetcher multi-sources")
+            
+            try:
+                exchanges_list = ['binance', 'coinbase', 'kraken', 'kucoin', 'okx']
+                if exchange_name.lower() in exchanges_list:
+                    exchanges_list = [exchange_name.lower()] + [e for e in exchanges_list if e != exchange_name.lower()]
+                
+                agg, detail, fetch_data = compare_exchanges_on_bases(
+                    exchanges=exchanges_list,
+                    bases=[symbol],
+                    timeframe=tf,
+                    lookback_days=365,
+                    since_ms=since_ms,
+                    until_ms=until_ms,
+                    selection="best"
+                )
+                
+                if agg is None or agg.empty:
+                    print(f"❌ Aucune donnée reçue pour {symbol}")
+                    return jsonify({"error": f"Aucune donnée disponible pour {symbol}"}), 400
+                
+                if symbol not in fetch_data.get("__FINAL__", {}):
+                    available = list(fetch_data.get("__FINAL__", {}).keys())
+                    print(f"❌ {symbol} non trouvé. Disponibles: {available}")
+                    return jsonify({"error": f"Symbole {symbol} non trouvé"}), 400
+                
+                df = fetch_data["__FINAL__"][symbol].copy()
+                
+                if df.empty:
+                    print(f"❌ DataFrame vide pour {symbol}")
+                    return jsonify({"error": f"Aucune donnée pour {symbol}"}), 400
+                
+                print(f"✅ {len(df)} bougies téléchargées")
+                
+                if 'date' in df.columns:
+                    df = df.set_index('date')
+                elif 'timestamp' in df.columns:
+                    df.index = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+                    df = df.drop('timestamp', axis=1, errors='ignore')
+                
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+                
+                if 'timestamp' in df.columns:
+                    df = df.drop('timestamp', axis=1)
+                
+                df = df.rename(columns={
+                    'open': 'Open',
+                    'high': 'High',
+                    'low': 'Low',
+                    'close': 'Close',
+                    'volume': 'Volume'
+                })
+                
+                required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                missing = [col for col in required_cols if col not in df.columns]
+                if missing:
+                    print(f"❌ Colonnes manquantes: {missing}")
+                    return jsonify({"error": f"Colonnes manquantes: {missing}"}), 400
+                
+                df = df[required_cols]
+                
+            except Exception as e:
+                print(f"❌ Erreur crypto: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({"error": f"Erreur: {str(e)}"}), 500
+        
+        if df is None or df.empty:
+            return jsonify({"error": "Impossible de télécharger les données"}), 400
+        
+        print(f"✅ {len(df)} barres téléchargées")
+        
+        # Créer les paramètres de base
+        base_params_dict = data.get('base_params', {})
+        base_params = ParametresDCA_SmartBotV2(**base_params_dict)
+        
+        # Définir la plage de paramètre à optimiser
+        param_config = data.get('parameter', {})
+        param_range = ParameterRange(
+            name=param_config['name'],
+            min_value=param_config['min_value'],
+            max_value=param_config['max_value'],
+            step=param_config.get('step', 1),
+            type=param_config.get('type', 'int')
+        )
+        
+        # Créer l'optimiseur et lancer l'optimisation
+        optimizer = StrategyOptimizer(df, base_params)
+        results = optimizer.run_single_parameter_optimization(param_range)
+        
+        # Retourner les résultats
+        top_results = optimizer.get_top_results(n=20)
+        
+        return jsonify({
+            "success": True,
+            "parameter": param_config['name'],
+            "total_configurations": len(results),
+            "top_results": [r.to_dict() for r in top_results],
+            "all_results": [r.to_dict() for r in results]
+        })
+        
+    except Exception as e:
+        print(f"❌ Erreur optimisation simple: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/optimize-grid-search', methods=['POST'])
+def optimize_grid_search():
+    """
+    Optimise plusieurs paramètres simultanément (grid search)
+    
+    Body JSON requis:
+    {
+        "symbol": "BTC",
+        "quote": "USD",
+        "exchange": "binance",
+        "timeframe": "1d",
+        "start_date": "2024-01-01",
+        "end_date": "2025-01-01",
+        "parameters": [
+            {
+                "name": "rsi_length",
+                "min_value": 2,
+                "max_value": 6,
+                "step": 1,
+                "type": "int"
+            },
+            {
+                "name": "dsc_rsi_threshold_low",
+                "min_value": 1,
+                "max_value": 5,
+                "step": 1,
+                "type": "int"
+            }
+        ],
+        "max_iterations": 100,  // Optionnel: limite le nombre de combinaisons
+        "base_params": { ... }
+    }
+    """
+    try:
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from optimizer import StrategyOptimizer, ParameterRange
+        from backtester_exact import ParametresDCA_SmartBotV2
+        
+        data = request.json
+        
+        # Récupération des données de marché
+        symbol = data.get('symbol', 'BTC')
+        quote = data.get('quote', 'USD')
+        exchange_name = data.get('exchange', 'binance')
+        timeframe = data.get('timeframe', '1d')
+        start_date = data.get('start_date', '2024-01-01')
+        end_date = data.get('end_date', '2025-01-01')
+        max_iterations = data.get('max_iterations')
+        
+        print(f"🔍 Grid Search: {symbol}-{quote} sur {exchange_name}")
+        
+        # Télécharger les données de prix
+        from datetime import datetime as dt, timezone
+        start_dt = dt.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        end_dt = dt.strptime(end_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        since_ms = int(start_dt.timestamp() * 1000)
+        until_ms = int(end_dt.timestamp() * 1000)
+        
+        timeframe_map = {'1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d'}
+        tf = timeframe_map.get(timeframe, '1d')
+        
+        # ==============================================
+        # ALPACA (US STOCKS) - Traitement direct
+        # ==============================================
+        if exchange_name.lower() == "alpaca":
+            print(f"📈 Mode STOCKS US - Téléchargement {symbol} via Alpaca")
+            
+            try:
+                df = fetch_ohlcv(
+                    exchange="alpaca",
+                    symbol=symbol,
+                    timeframe=tf,
+                    since_ms=since_ms,
+                    until_ms=until_ms
+                )
+                
+                if df.empty:
+                    return jsonify({"error": f"Aucune donnée disponible pour {symbol}"}), 400
+                
+                print(f"✅ {len(df)} bougies téléchargées")
+                
+                if 'date' in df.columns:
+                    df = df.set_index('date')
+                elif 'timestamp' in df.columns:
+                    df.index = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+                    df = df.drop('timestamp', axis=1, errors='ignore')
+                
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+                
+                df = df.drop(['exchange', 'pair'], axis=1, errors='ignore')
+                if 'timestamp' in df.columns:
+                    df = df.drop('timestamp', axis=1)
+                
+                df = df.rename(columns={
+                    'open': 'Open',
+                    'high': 'High',
+                    'low': 'Low',
+                    'close': 'Close',
+                    'volume': 'Volume'
+                })
+                
+            except Exception as e:
+                print(f"❌ Erreur Alpaca: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({"error": f"Erreur Alpaca: {str(e)}"}), 500
+        
+        # ==============================================
+        # CRYPTO - Multi-sources
+        # ==============================================
+        else:
+            print(f"🔄 Téléchargement {symbol} via fetcher multi-sources")
+            
+            try:
+                exchanges_list = ['binance', 'coinbase', 'kraken', 'kucoin', 'okx']
+                if exchange_name.lower() in exchanges_list:
+                    exchanges_list = [exchange_name.lower()] + [e for e in exchanges_list if e != exchange_name.lower()]
+                
+                agg, detail, fetch_data = compare_exchanges_on_bases(
+                    exchanges=exchanges_list,
+                    bases=[symbol],
+                    timeframe=tf,
+                    lookback_days=365,
+                    since_ms=since_ms,
+                    until_ms=until_ms,
+                    selection="best"
+                )
+                
+                if agg is None or agg.empty or symbol not in fetch_data.get("__FINAL__", {}):
+                    return jsonify({"error": f"Aucune donnée disponible pour {symbol}"}), 400
+                
+                df = fetch_data["__FINAL__"][symbol].copy()
+                
+                if df.empty:
+                    return jsonify({"error": f"Aucune donnée pour {symbol}"}), 400
+                
+                print(f"✅ {len(df)} bougies téléchargées")
+                
+                if 'date' in df.columns:
+                    df = df.set_index('date')
+                elif 'timestamp' in df.columns:
+                    df.index = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+                    df = df.drop('timestamp', axis=1, errors='ignore')
+                
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+                
+                if 'timestamp' in df.columns:
+                    df = df.drop('timestamp', axis=1)
+                
+                df = df.rename(columns={
+                    'open': 'Open',
+                    'high': 'High',
+                    'low': 'Low',
+                    'close': 'Close',
+                    'volume': 'Volume'
+                })
+                
+                required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                missing = [col for col in required_cols if col not in df.columns]
+                if missing:
+                    return jsonify({"error": f"Colonnes manquantes: {missing}"}), 400
+                
+                df = df[required_cols]
+                
+            except Exception as e:
+                print(f"❌ Erreur crypto: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({"error": f"Erreur: {str(e)}"}), 500
+        
+        if df is None or df.empty:
+            return jsonify({"error": "Impossible de télécharger les données"}), 400
+        
+        print(f"✅ {len(df)} barres téléchargées")
+        
+        # Créer les paramètres de base
+        base_params_dict = data.get('base_params', {})
+        base_params = ParametresDCA_SmartBotV2(**base_params_dict)
+        
+        # Définir les plages de paramètres à optimiser
+        param_configs = data.get('parameters', [])
+        param_ranges = []
+        for config in param_configs:
+            param_ranges.append(ParameterRange(
+                name=config['name'],
+                min_value=config['min_value'],
+                max_value=config['max_value'],
+                step=config.get('step', 1),
+                type=config.get('type', 'int')
+            ))
+        
+        # Créer l'optimiseur et lancer le grid search
+        optimizer = StrategyOptimizer(df, base_params)
+        results = optimizer.run_grid_search(param_ranges, max_iterations=max_iterations)
+        
+        # Retourner les résultats
+        top_results = optimizer.get_top_results(n=20)
+        
+        param_names = [p['name'] for p in param_configs]
+        
+        return jsonify({
+            "success": True,
+            "parameters": param_names,
+            "total_configurations": len(results),
+            "top_results": [r.to_dict() for r in top_results],
+            "all_results": [r.to_dict() for r in results]
+        })
+        
+    except Exception as e:
+        print(f"❌ Erreur grid search: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 # -----------------------------------------------------------------------------

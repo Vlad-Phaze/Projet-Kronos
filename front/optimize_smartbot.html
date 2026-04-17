@@ -1,0 +1,1130 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Kronos Capital - Parameter Optimization</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #edeae4;
+            color: #1a1a1a;
+            min-height: 100vh;
+            padding: 0;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+            background: #edeae4;
+            padding: 0;
+        }
+        
+        header {
+            background: #edeae4;
+            color: #1a1a1a;
+            padding: 24px 40px;
+            border-bottom: none;
+            box-shadow: none;
+        }
+        
+        h1 {
+            color: #1a1a1a;
+            margin-bottom: 8px;
+            font-size: 2em;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+        
+        .subtitle {
+            color: #888888;
+            margin-bottom: 15px;
+            font-size: 0.95em;
+            font-weight: 400;
+        }
+        
+        .nav-links {
+            margin-top: 20px;
+            padding-top: 20px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .nav-btn {
+            padding: 10px 20px;
+            border: 1px solid #ddd9d3;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #ffffff;
+            color: #1a1a1a;
+        }
+        
+        .nav-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            border-color: #1a1a1a;
+        }
+        
+        .nav-btn.active {
+            background: #1a1a1a;
+            color: #ffffff;
+            border-color: #1a1a1a;
+        }
+        
+        .sections-container {
+            display: flex;
+            flex-direction: row;
+            padding: 40px 20px;
+            background: #edeae4;
+            gap: 20px;
+        }
+        
+        .section {
+            background: #ffffff;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #ddd9d3;
+        }
+        
+        .section-full-width {
+            background: #ffffff;
+            display: flex;
+            flex-direction: column;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #ddd9d3;
+            margin: 0 20px 40px 20px;
+        }
+        
+        .accordion-header {
+            color: #ffffff;
+            font-size: 0.85em;
+            padding: 16px 12px;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.2s;
+            background: #1a1a1a;
+            text-align: center;
+            position: relative;
+        }
+        
+        .accordion-icon {
+            font-size: 0.7em;
+            transition: transform 0.3s;
+            color: inherit;
+            margin-top: 3px;
+            position: absolute;
+            right: 12px;
+        }
+        
+        .accordion-header.active .accordion-icon {
+            transform: rotate(180deg);
+        }
+        
+        .accordion-content {
+            display: none;
+            background: #ffffff;
+        }
+        
+        .accordion-content.active {
+            display: block;
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .accordion-body {
+            padding: 20px 15px;
+        }
+        
+        .form-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .form-group {
+            margin-bottom: 0;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #1a1a1a;
+            font-size: 0.75em;
+            font-weight: 600;
+            letter-spacing: 0;
+        }
+        
+        .label-help {
+            color: #999;
+            font-size: 0.75em;
+            display: block;
+            margin-top: 3px;
+            font-weight: 400;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+        
+        input[type="text"],
+        input[type="number"],
+        input[type="date"],
+        select {
+            width: 100%;
+            padding: 8px 12px;
+            background: #f8f8f8;
+            border: none;
+            border-radius: 6px;
+            color: #1a1a1a;
+            font-size: 13px;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            transition: all 0.2s;
+        }
+        
+        input:focus,
+        select:focus {
+            outline: none;
+            background: #f0f0f0;
+            box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.05);
+        }
+        
+        .btn {
+            padding: 14px 32px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            display: inline-block;
+            min-width: 200px;
+        }
+        
+        .button-container {
+            padding: 24px;
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            background: #edeae4;
+            border-top: none;
+        }
+        
+        .btn-primary {
+            background: #1a1a1a;
+            color: #ffffff;
+            border: 1px solid #1a1a1a;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background: #333;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-secondary {
+            background: #ffffff;
+            color: #1a1a1a;
+            border: none;
+        }
+        
+        .btn-secondary:hover {
+            background: #f5f5f5;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+        
+        #parametersContainer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        
+        .parameter-item {
+            background: #ffffff;
+            border-radius: 12px;
+            margin-bottom: 0;
+            flex: 0 0 auto;
+            width: 280px;
+            max-width: 280px;
+            border: 1px solid #ddd9d3;
+            overflow: hidden;
+        }
+        
+        .parameter-header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 14px 12px;
+            background: #1a1a1a;
+            color: #ffffff;
+        }
+        
+        .parameter-name {
+            font-weight: 700;
+            color: #ffffff;
+            font-size: 0.85em;
+            letter-spacing: -0.01em;
+            text-align: center;
+        }
+        
+        .parameter-body {
+            padding: 20px 15px;
+            background: #ffffff;
+        }
+        
+        .param-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(237, 234, 228, 0.95);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .loading-overlay.show {
+            display: flex;
+        }
+        
+        .loading-content {
+            text-align: center;
+        }
+        
+        .spinner {
+            border: 4px solid #ddd9d3;
+            border-top: 4px solid #1a1a1a;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .results-section {
+            padding: 40px 20px;
+            background: #edeae4;
+            display: none;
+        }
+        
+        .results-section.show {
+            display: block;
+        }
+        
+        .results-card {
+            background: #ffffff;
+            border-radius: 12px;
+            border: 1px solid #ddd9d3;
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+        
+        .results-title {
+            font-size: 1.5em;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: #1a1a1a;
+        }
+        
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .results-table th {
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 14px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 0.85em;
+        }
+        
+        .results-table td {
+            padding: 12px 14px;
+            border-bottom: 1px solid #ddd9d3;
+            font-size: 0.9em;
+        }
+        
+        .results-table tr:hover {
+            background: #f8f8f8;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        
+        .badge-gold {
+            background: #ffd700;
+            color: #1a1a1a;
+        }
+        
+        .badge-silver {
+            background: #c0c0c0;
+            color: #1a1a1a;
+        }
+        
+        .badge-bronze {
+            background: #cd7f32;
+            color: #ffffff;
+        }
+        
+        .positive {
+            color: #22c55e;
+        }
+        
+        .negative {
+            color: #ef4444;
+        }
+        
+        .info-box {
+            background: #f8f9fa;
+            border-left: 4px solid #1a1a1a;
+            padding: 20px;
+            margin-bottom: 20px;
+            color: #888888;
+            font-size: 0.9em;
+            line-height: 1.7;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .info-box strong {
+            color: #1a1a1a;
+            font-weight: 700;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>KRONOS CAPITAL OPTIMIZER</h1>
+            <p class="subtitle">Automatic parameter optimization for SmartBot V2 strategy</p>
+            <div class="nav-links">
+                <a href="index.html" class="nav-btn">Home</a>
+                <a href="configure_smartbot.html" class="nav-btn">Crypto Single</a>
+                <a href="run_multi_smartbot.html" class="nav-btn">Crypto Multi</a>
+                <a href="configure_smartbot_stocks.html" class="nav-btn">Stock Single</a>
+                <a href="run_multi_smartbot_stocks.html" class="nav-btn">Stocks Multi</a>
+                <a href="optimize_smartbot.html" class="nav-btn active">Optimize</a>
+            </div>
+        </header>
+
+        <form id="optimizationForm">
+            <div class="sections-container">
+                <!-- Market Data -->
+                <div class="section">
+                    <div class="accordion-header active" onclick="toggleAccordion(0)">
+                        <span>Market Data</span>
+                        <span class="accordion-icon">▼</span>
+                    </div>
+                    <div class="accordion-content active" data-section="0">
+                        <div class="accordion-body">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label>Market Type</label>
+                                    <select id="exchange" onchange="updateMarketType()">
+                                        <option value="binance">Crypto (Binance)</option>
+                                        <option value="alpaca">Stocks (Alpaca)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label id="assetLabel">Asset
+                                        <span class="label-help" id="assetHelp">Ex: BTC, ETH, SOL</span>
+                                    </label>
+                                    <input type="text" id="symbol" value="BTC" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Timeframe</label>
+                                    <select id="timeframe">
+                                        <option value="1m">1 minute</option>
+                                        <option value="5m">5 minutes</option>
+                                        <option value="15m">15 minutes</option>
+                                        <option value="1h" selected>1 hour</option>
+                                        <option value="4h">4 hours</option>
+                                        <option value="1d">1 day</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Start Date</label>
+                                    <input type="date" id="start_date" value="2024-01-01" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>End Date</label>
+                                    <input type="date" id="end_date" value="2025-01-01" required>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Entry Conditions -->
+                <div class="section">
+                    <div class="accordion-header active" onclick="toggleAccordion(1)">
+                        <span>Entry Conditions</span>
+                        <span class="accordion-icon">▼</span>
+                    </div>
+                    <div class="accordion-content active" data-section="1">
+                        <div class="accordion-body">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label>DSC Primaire</label>
+                                    <select id="dsc">
+                                        <option value="RSI">RSI Seul</option>
+                                        <option value="MFI">MFI Seul</option>
+                                        <option value="Bollinger Band %">Bollinger Band % Seul</option>
+                                        <option value="RSI + MFI" selected>RSI + MFI</option>
+                                        <option value="RSI + BB">RSI + Bollinger Band %</option>
+                                        <option value="BB + MFI">BB % + MFI</option>
+                                        <option value="All Three">Tous les 3</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>RSI Length</label>
+                                    <input type="number" id="rsi_length" value="2" min="1" max="50">
+                                </div>
+                                <div class="form-group">
+                                    <label>RSI Threshold (Oversold)</label>
+                                    <input type="number" id="rsi_threshold" value="3" min="1" max="50">
+                                </div>
+                                <div class="form-group">
+                                    <label>MFI Length</label>
+                                    <input type="number" id="mfi_length" value="14" min="1" max="50">
+                                </div>
+                                <div class="form-group">
+                                    <label>MFI Threshold (Oversold)</label>
+                                    <input type="number" id="mfi_threshold" value="30" min="1" max="50">
+                                </div>
+                                <div class="form-group">
+                                    <label>BB Length</label>
+                                    <input type="number" id="bb_length" value="20" min="1" max="100">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Order Management -->
+                <div class="section">
+                    <div class="accordion-header active" onclick="toggleAccordion(2)">
+                        <span>Order Management</span>
+                        <span class="accordion-icon">▼</span>
+                    </div>
+                    <div class="accordion-content active" data-section="2">
+                        <div class="accordion-body">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label>Base Order ($)</label>
+                                    <input type="number" id="base_order" value="1000" min="1" step="1">
+                                </div>
+                                <div class="form-group">
+                                    <label>Safety Order ($)</label>
+                                    <input type="number" id="safe_order" value="1500" min="1" step="1">
+                                </div>
+                                <div class="form-group">
+                                    <label>Max Safety Orders</label>
+                                    <input type="number" id="max_so" value="20" min="1" max="50">
+                                </div>
+                                <div class="form-group">
+                                    <label>SO Volume Scale
+                                        <span class="label-help">Multiplier per SO</span>
+                                    </label>
+                                    <input type="number" id="so_volume_scale" value="1.5" min="1" max="3" step="0.1">
+                                </div>
+                                <div class="form-group">
+                                    <label>Initial Capital ($)
+                                        <span class="label-help">Starting balance</span>
+                                    </label>
+                                    <input type="number" id="initial_capital" value="100000" min="1000" step="1000">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Price Deviation -->
+                <div class="section">
+                    <div class="accordion-header active" onclick="toggleAccordion(3)">
+                        <span>Price Deviation</span>
+                        <span class="accordion-icon">▼</span>
+                    </div>
+                    <div class="accordion-content active" data-section="3">
+                        <div class="accordion-body">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label>Deviation Method</label>
+                                    <select id="pricedevbase">
+                                        <option value="From Base Order">From Base Order</option>
+                                        <option value="From Last Safety Order">From Last Safety Order</option>
+                                        <option value="ATR" selected>ATR (Dynamic)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Price Deviation (%)
+                                        <span class="label-help">Not used if ATR</span>
+                                    </label>
+                                    <input type="number" id="price_deviation" value="4.0" min="0.1" step="0.1">
+                                </div>
+                                <div class="form-group">
+                                    <label>ATR Length</label>
+                                    <input type="number" id="atr_length" value="14" min="1" max="50">
+                                </div>
+                                <div class="form-group">
+                                    <label>ATR Multiplier</label>
+                                    <input type="number" id="atr_mult" value="3.0" min="0.5" step="0.1">
+                                </div>
+                                <div class="form-group">
+                                    <label>ATR Step Scale
+                                        <span class="label-help">Growth per SO</span>
+                                    </label>
+                                    <input type="number" id="atr_step_scale" value="1.2" min="1" max="2" step="0.1">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Take Profit -->
+                <div class="section">
+                    <div class="accordion-header active" onclick="toggleAccordion(4)">
+                        <span>Take Profit</span>
+                        <span class="accordion-icon">▼</span>
+                    </div>
+                    <div class="accordion-content active" data-section="4">
+                        <div class="accordion-body">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label>Take Profit (%)</label>
+                                    <input type="number" id="take_profit" value="1.5" min="0.1" step="0.1">
+                                </div>
+                                <div class="form-group">
+                                    <label>TP Type</label>
+                                    <select id="tp_type">
+                                        <option value="From Average Entry" selected>From Average Entry</option>
+                                        <option value="From Base Order">From Base Order</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Max Hold Time (days)</label>
+                                    <input type="number" id="max_hold_time_days" value="5" min="0" step="1" title="Max hold time in days (0 = disabled)">
+                                </div>
+                                <div class="form-group">
+                                    <label>Commission (%)</label>
+                                    <input type="number" id="commission" value="0.1" min="0" step="0.01">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Optimization Settings (Full Width Section) -->
+            <div class="section-full-width">
+                <div class="accordion-header active" onclick="toggleAccordion(5)">
+                    <span>Optimization Settings</span>
+                    <span class="accordion-icon">▼</span>
+                </div>
+                <div class="accordion-content active" data-section="5">
+                    <div class="accordion-body">
+                        <div id="parametersContainer">
+                            <!-- Parameters will be added here -->
+                        </div>
+
+                        <div class="form-grid" style="margin-top: 20px;">
+                            <div class="form-group">
+                                <label>Add Parameter to Optimize</label>
+                                <select id="parameterSelector">
+                                    <optgroup label="Indicators">
+                                        <option value="rsi_length">RSI Length</option>
+                                        <option value="dsc_rsi_threshold_low">RSI Threshold</option>
+                                        <option value="mfi_length">MFI Length</option>
+                                        <option value="mfi_threshold_low">MFI Threshold</option>
+                                        <option value="bb_length">BB Length</option>
+                                        <option value="bb_mult">BB Multiplier</option>
+                                    </optgroup>
+                                    <optgroup label="DCA">
+                                        <option value="base_order">Base Order</option>
+                                        <option value="safe_order">Safety Order</option>
+                                        <option value="max_safe_order">Max Safety Orders</option>
+                                        <option value="price_deviation">Price Deviation</option>
+                                    </optgroup>
+                                    <optgroup label="Take Profit">
+                                        <option value="take_profit">Take Profit %</option>
+                                    </optgroup>
+                                    <optgroup label="ATR">
+                                        <option value="atr_length">ATR Length</option>
+                                        <option value="atr_mult">ATR Multiplier</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                        </div>
+
+                        <button type="button" class="btn btn-secondary" onclick="addParameter()" style="width: 100%; margin-top: 10px;">
+                            Add Parameter
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="button-container">
+                <button type="submit" class="btn btn-primary" id="runBtn">Run Optimization</button>
+                <button type="button" class="btn btn-secondary" onclick="resetForm()">Reset</button>
+            </div>
+        </form>
+
+        <!-- Loading Overlay -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="loading-content">
+                <div class="spinner"></div>
+                <p id="loadingText">Running optimization...</p>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div class="results-section" id="resultsSection">
+            <div class="results-card">
+                <div class="results-title">Optimization Results</div>
+                
+                <div class="btn-group">
+                    <button class="btn btn-secondary" onclick="exportCSV()">Export CSV</button>
+                    <button class="btn btn-secondary" onclick="exportJSON()">Export JSON</button>
+                </div>
+
+                <div id="resultsContent">
+                    <!-- Results will be displayed here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let parameters = [];
+        let optimizationResults = null;
+        let currentMode = 'single';
+
+        // Initialize with first parameter
+        window.onload = () => {
+            addParameter();
+        };
+
+        function updateMarketType() {
+            const exchange = document.getElementById('exchange').value;
+            const symbolField = document.getElementById('symbol');
+            const assetHelp = document.getElementById('assetHelp');
+            
+            if (exchange === 'alpaca') {
+                symbolField.value = 'AAPL';
+                assetHelp.textContent = 'Ex: AAPL, TSLA, NVDA';
+            } else {
+                symbolField.value = 'BTC';
+                assetHelp.textContent = 'Ex: BTC, ETH, SOL';
+            }
+        }
+
+        function toggleAccordion(index) {
+            const targetHeader = document.querySelectorAll('.accordion-header')[index];
+            const targetContent = document.querySelector(`.accordion-content[data-section="${index}"]`);
+            
+            // Toggle selected accordion only (allow multiple open)
+            targetHeader.classList.toggle('active');
+            targetContent.classList.toggle('active');
+        }
+        
+        function resetForm() {
+            if (confirm('Reset all parameters?')) {
+                document.getElementById('optimizationForm').reset();
+                parameters = [];
+                renderParameters();
+                addParameter();
+            }
+        }
+
+        function addParameter() {
+
+            const selector = document.getElementById('parameterSelector');
+            const paramName = selector.value;
+            const paramLabel = selector.options[selector.selectedIndex].text;
+
+            if (parameters.find(p => p.name === paramName)) {
+                alert('This parameter is already added.');
+                return;
+            }
+
+            const defaults = {
+                rsi_length: { min: 2, max: 14, step: 1, type: 'int' },
+                dsc_rsi_threshold_low: { min: 1, max: 10, step: 1, type: 'int' },
+                mfi_length: { min: 10, max: 20, step: 1, type: 'int' },
+                mfi_threshold_low: { min: 10, max: 40, step: 5, type: 'int' },
+                bb_length: { min: 10, max: 30, step: 2, type: 'int' },
+                bb_mult: { min: 1.5, max: 3.0, step: 0.5, type: 'float' },
+                base_order: { min: 500, max: 2000, step: 250, type: 'float' },
+                safe_order: { min: 750, max: 3000, step: 250, type: 'float' },
+                max_safe_order: { min: 5, max: 20, step: 5, type: 'int' },
+                price_deviation: { min: 1, max: 10, step: 1, type: 'float' },
+                take_profit: { min: 0.5, max: 3.0, step: 0.5, type: 'float' },
+                atr_length: { min: 7, max: 21, step: 1, type: 'int' },
+                atr_mult: { min: 1.0, max: 5.0, step: 0.5, type: 'float' },
+            };
+
+            const def = defaults[paramName] || { min: 1, max: 10, step: 1, type: 'int' };
+
+            parameters.push({
+                name: paramName,
+                label: paramLabel,
+                min: def.min,
+                max: def.max,
+                step: def.step,
+                type: def.type
+            });
+
+            renderParameters();
+        }
+
+        function removeParameter(index) {
+            parameters.splice(index, 1);
+            renderParameters();
+        }
+
+        function renderParameters() {
+            const container = document.getElementById('parametersContainer');
+            
+            if (parameters.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+
+            container.innerHTML = parameters.map((param, index) => `
+                <div class="parameter-item">
+                    <div class="parameter-header">
+                        <span class="parameter-name">${param.label}</span>
+                    </div>
+                    <div class="parameter-body">
+                        <div class="param-grid">
+                            <div class="form-group">
+                                <label style="font-size: 0.75em;">Min</label>
+                                <input type="number" value="${param.min}" step="${param.step}" 
+                                       onchange="parameters[${index}].min = parseFloat(this.value)">
+                            </div>
+                            <div class="form-group">
+                                <label style="font-size: 0.75em;">Max</label>
+                                <input type="number" value="${param.max}" step="${param.step}" 
+                                       onchange="parameters[${index}].max = parseFloat(this.value)">
+                            </div>
+                            <div class="form-group">
+                                <label style="font-size: 0.75em;">Step</label>
+                                <input type="number" value="${param.step}" step="${param.step}" 
+                                       onchange="parameters[${index}].step = parseFloat(this.value)">
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-secondary" onclick="removeParameter(${index})" style="width: 100%; margin-top: 12px; padding: 8px 12px; font-size: 12px; min-width: auto;">
+                            Remove
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        document.getElementById('optimizationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            if (parameters.length === 0) {
+                alert('Please add at least one parameter to optimize.');
+                return;
+            }
+
+            const exchange = document.getElementById('exchange').value;
+            const quote = exchange === 'alpaca' ? 'USD' : 'USDT';
+            
+            // Auto-detect mode based on parameter count
+            currentMode = parameters.length === 1 ? 'single' : 'grid';
+            
+            console.log('Mode détecté:', currentMode);
+            console.log('Nombre de paramètres:', parameters.length);
+
+            const config = {
+                symbol: document.getElementById('symbol').value,
+                quote: quote,
+                exchange: exchange,
+                timeframe: document.getElementById('timeframe').value,
+                start_date: document.getElementById('start_date').value,
+                end_date: document.getElementById('end_date').value,
+                base_params: {
+                    dsc: document.getElementById('dsc').value,
+                    dsc2_enabled: false,
+                    base_order: parseFloat(document.getElementById('base_order').value),
+                    safe_order: parseFloat(document.getElementById('safe_order').value),
+                    max_safe_order: parseInt(document.getElementById('max_so').value),
+                    safe_order_volume_scale: parseFloat(document.getElementById('so_volume_scale').value),
+                    pricedevbase: document.getElementById('pricedevbase').value,
+                    price_deviation: parseFloat(document.getElementById('price_deviation').value),
+                    deviation_scale: 1.0,
+                    atr_length: parseInt(document.getElementById('atr_length').value),
+                    atr_mult: parseFloat(document.getElementById('atr_mult').value),
+                    atr_mult_step_scale: parseFloat(document.getElementById('atr_step_scale').value),
+                    take_profit: parseFloat(document.getElementById('take_profit').value),
+                    tp_type: document.getElementById('tp_type').value,
+                    max_hold_time_days: parseInt(document.getElementById('max_hold_time_days').value),
+                    rsi_length: parseInt(document.getElementById('rsi_length').value),
+                    rsi_source: "close",
+                    dsc_rsi_threshold_low: parseInt(document.getElementById('rsi_threshold').value),
+                    bb_length: parseInt(document.getElementById('bb_length').value),
+                    bb_mult: 2.0,
+                    bb_source: "close",
+                    bb_threshold_low: 0.0,
+                    mfi_length: parseInt(document.getElementById('mfi_length').value),
+                    mfi_threshold_low: parseInt(document.getElementById('mfi_threshold').value),
+                    initial_capital: parseFloat(document.getElementById('initial_capital').value),
+                    commission: parseFloat(document.getElementById('commission').value) / 100,
+                    slippage_pourcent: 0.0,
+                    close_last_trade: false,
+                    restrict_trading_to_us_market_hours: exchange === 'alpaca',
+                    trading_timeframe: document.getElementById('timeframe').value
+                }
+            };
+
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            const runBtn = document.getElementById('runBtn');
+            
+            loadingOverlay.classList.add('show');
+            runBtn.disabled = true;
+
+            try {
+                let endpoint, body;
+
+                if (currentMode === 'single') {
+                    endpoint = '/optimize-single-parameter';
+                    body = {
+                        ...config,
+                        parameter: {
+                            name: parameters[0].name,
+                            min_value: parameters[0].min,
+                            max_value: parameters[0].max,
+                            step: parameters[0].step,
+                            type: parameters[0].type
+                        }
+                    };
+                } else {
+                    endpoint = '/optimize-grid-search';
+                    body = {
+                        ...config,
+                        parameters: parameters.map(p => ({
+                            name: p.name,
+                            min_value: p.min,
+                            max_value: p.max,
+                            step: p.step,
+                            type: p.type
+                        })),
+                        max_iterations: 100
+                    };
+                }
+
+                console.log('Endpoint:', endpoint);
+                console.log('Body:', JSON.stringify(body, null, 2));
+
+                const response = await fetch(`http://localhost:5002${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                console.log('Response status:', response.status);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Error response:', errorText);
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (!data.success) {
+                    throw new Error(data.error || 'Unknown error');
+                }
+
+                optimizationResults = data;
+                displayResults(data);
+
+            } catch (error) {
+                alert(`Optimization error: ${error.message}`);
+                console.error(error);
+            } finally {
+                loadingOverlay.classList.remove('show');
+                runBtn.disabled = false;
+            }
+        });
+
+        function displayResults(data) {
+            const section = document.getElementById('resultsSection');
+            const content = document.getElementById('resultsContent');
+            
+            section.classList.add('show');
+
+            const topResults = data.top_results.slice(0, 20);
+            
+            let html = `
+                <div class="info-box" style="margin-top: 20px;">
+                    <strong>${data.total_configurations} configurations tested</strong><br>
+                    ${currentMode === 'single' ? 
+                        `Parameter: <strong>${data.parameter}</strong>` :
+                        `Parameters: <strong>${data.parameters.join(', ')}</strong>`
+                    }
+                </div>
+
+                <div style="overflow-x: auto;">
+                    <table class="results-table">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                ${parameters.map(p => `<th>${p.label}</th>`).join('')}
+                                <th>PnL Total</th>
+                                <th>Return %</th>
+                                <th>Drawdown %</th>
+                                <th>Ratio G/DD</th>
+                                <th>Win Rate %</th>
+                                <th>Trades</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            topResults.forEach((result, index) => {
+                const badgeClass = index === 0 ? 'badge-gold' : index === 1 ? 'badge-silver' : index === 2 ? 'badge-bronze' : '';
+                const badge = badgeClass ? `<span class="badge ${badgeClass}">#${index + 1}</span>` : `#${index + 1}`;
+
+                html += `
+                    <tr>
+                        <td>${badge}</td>
+                        ${parameters.map(p => `<td><strong>${result[p.name]}</strong></td>`).join('')}
+                        <td class="${result.total_pnl >= 0 ? 'positive' : 'negative'}">$${result.total_pnl.toFixed(2)}</td>
+                        <td class="${result.capital_return_pct >= 0 ? 'positive' : 'negative'}">${result.capital_return_pct.toFixed(2)}%</td>
+                        <td class="negative">${result.max_drawdown_pct.toFixed(2)}%</td>
+                        <td><strong>${result.gain_drawdown_ratio.toFixed(2)}</strong></td>
+                        <td>${result.win_rate.toFixed(1)}%</td>
+                        <td>${result.total_trades}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            content.innerHTML = html;
+            section.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function exportCSV() {
+            if (!optimizationResults) return;
+
+            const results = optimizationResults.all_results;
+            const headers = ['rank', ...parameters.map(p => p.name), 'total_pnl', 'capital_return_pct', 'max_drawdown_pct', 'gain_drawdown_ratio', 'win_rate', 'total_trades'];
+            
+            let csv = headers.join(',') + '\n';
+            results.forEach((r, i) => {
+                const row = [
+                    i + 1,
+                    ...parameters.map(p => r[p.name]),
+                    r.total_pnl,
+                    r.capital_return_pct,
+                    r.max_drawdown_pct,
+                    r.gain_drawdown_ratio,
+                    r.win_rate,
+                    r.total_trades
+                ];
+                csv += row.join(',') + '\n';
+            });
+
+            downloadFile(csv, 'optimization_results.csv', 'text/csv');
+        }
+
+        function exportJSON() {
+            if (!optimizationResults) return;
+            
+            const json = JSON.stringify(optimizationResults, null, 2);
+            downloadFile(json, 'optimization_results.json', 'application/json');
+        }
+
+        function downloadFile(content, filename, type) {
+            const blob = new Blob([content], { type });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>

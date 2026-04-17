@@ -46,6 +46,11 @@ class ParametresDCA_SmartBotV2:
     tp_type: str = "From Average Entry"  # Options: "From Average Entry", "From Base Order"
     
     # ═══════════════════════════════════════════════════════════
+    # TIME-BASED EXIT (TIME SL)
+    # ═══════════════════════════════════════════════════════════
+    max_hold_time_days: int = 5  # Max hold time in days (0 = disabled)
+    
+    # ═══════════════════════════════════════════════════════════
     # INDICATOR SETTINGS: RSI
     # ═══════════════════════════════════════════════════════════
     rsi_length: int = 2
@@ -427,19 +432,31 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 print(f"📍 [{indice[t].strftime('%Y-%m-%d')}] BASE ORDER @ ${price:.2f} | Qty={qty:.6f} | Capital restant=${capital_disponible:.2f}")
         
         # ═══════════════════════════════════════════════════════════
-        # LOGIQUE DE SORTIE (TAKE PROFIT)
+        # LOGIQUE DE SORTIE (TAKE PROFIT & TIME SL)
         # ═══════════════════════════════════════════════════════════
         elif in_trade and t != entry_bar and market_bar_allowed:
+            # Calculate hold time in days
+            hold_time_days = (indice[t] - indice[entry_bar]).total_seconds() / 86400  # seconds to days
+            time_sl_triggered = parametres.max_hold_time_days > 0 and hold_time_days >= parametres.max_hold_time_days
+            
             # Calculate TP price
             if parametres.tp_type == "From Average Entry":
                 tp_price = avg_entry_price * (1 + parametres.take_profit / 100.0)
             else:  # From Base Order
                 tp_price = base_order_price * (1 + parametres.take_profit / 100.0)
             
-            # Check TP on wick (high)
-            if high[t] >= tp_price:
+            # Check TP on wick (high) or Time SL
+            tp_hit = high[t] >= tp_price
+            
+            if tp_hit or time_sl_triggered:
                 # CLOSE DEAL
-                exit_price = tp_price  # Assume filled at TP price
+                # Determine exit price and reason
+                if tp_hit:
+                    exit_price = tp_price  # Assume filled at TP price
+                    exit_reason = "TP"
+                else:  # Time SL
+                    exit_price = price  # Close at current price
+                    exit_reason = "TIME_SL"
                 
                 # Calculate PnL
                 gross_proceeds = exit_price * total_position_size
@@ -457,6 +474,12 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 bo_pnl = bo_proceeds - parametres.base_order - bo_fees
                 bo_pnl_pct = ((exit_price / base_order_price) - 1) * 100.0
                 
+                # Determine signal message
+                if exit_reason == "TP":
+                    signal_msg = f"TP @ {parametres.take_profit}%"
+                else:  # TIME_SL
+                    signal_msg = f"Time SL @ {parametres.max_hold_time_days} days"
+                
                 individual_positions.append({
                     "type": "BO_0",
                     "entry_time": indice[entry_bar],
@@ -467,7 +490,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     "pnl": bo_pnl,
                     "pnl_pct": bo_pnl_pct,
                     "is_win": bo_pnl > 0,  # WIN si P&L individuel > 0
-                    "signal": f"TP @ {parametres.take_profit}%"
+                    "signal": signal_msg
                 })
                 
                 # 2. Chaque Safety Order P&L
@@ -490,7 +513,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                         "pnl": so_pnl,
                         "pnl_pct": so_pnl_pct,
                         "is_win": so_pnl > 0,  # WIN si P&L individuel > 0
-                        "signal": f"TP @ {parametres.take_profit}%"
+                        "signal": signal_msg
                     })
                 
                 transactions.append({
@@ -499,7 +522,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     "entry_price": base_order_price,
                     "avg_entry_price": avg_entry_price,
                     "exit_price": exit_price,
-                    "reason": "TP",
+                    "reason": exit_reason,
                     "so_count": current_so_count,
                     "so_times": [so['time'] for so in current_trade_so_list],
                     "so_prices": [so['price'] for so in current_trade_so_list],
@@ -519,8 +542,13 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     capital_history_array[capital_event_idx] = capital_disponible
                     capital_event_idx += 1
                 
-                print(f"✅ [{indice[t].strftime('%Y-%m-%d')}] TAKE PROFIT @ ${exit_price:.2f} | "
-                      f"SOs={current_so_count} | PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital=${capital_disponible:.2f}")
+                # Log message based on exit reason
+                if exit_reason == "TP":
+                    print(f"✅ [{indice[t].strftime('%Y-%m-%d')}] TAKE PROFIT @ ${exit_price:.2f} | "
+                          f"SOs={current_so_count} | PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital=${capital_disponible:.2f}")
+                else:  # TIME_SL
+                    print(f"⏰ [{indice[t].strftime('%Y-%m-%d')}] TIME SL ({parametres.max_hold_time_days} days) @ ${exit_price:.2f} | "
+                          f"SOs={current_so_count} | PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital=${capital_disponible:.2f}")
                 
                 # Reset state
                 in_trade = False
@@ -1637,11 +1665,16 @@ def backtest_smartbot_v2_multi_portfolio(
                 position['invested'] / position['quantity']
             )
             
+            # Calculate hold time in days
+            hold_time_days = (timestamp - position['entry_time']).total_seconds() / 86400  # seconds to days
+            time_sl_triggered = parametres.max_hold_time_days > 0 and hold_time_days >= parametres.max_hold_time_days
+            
             # Vérifier la condition de Take Profit
             tp_target = avg_entry * (1 + parametres.take_profit / 100)
             
-            if market_bar_allowed and current_price >= tp_target:
-                # SORTIE : Take Profit
+            if market_bar_allowed and (current_price >= tp_target or time_sl_triggered):
+                # SORTIE : Take Profit or Time SL
+                exit_reason = "TP" if current_price >= tp_target else "TIME_SL"
                 exit_value = position['quantity'] * current_price * (1 - parametres.commission)
                 pnl = exit_value - position['invested']
                 pnl_pct = (pnl / position['invested']) * 100
@@ -1664,6 +1697,7 @@ def backtest_smartbot_v2_multi_portfolio(
                     'entry_price': position['entry_price'],
                     'exit_time': timestamp,
                     'exit_price': current_price,
+                    'exit_reason': exit_reason,
                     'quantity': position['quantity'],
                     'so_count': position['so_count'],
                     'so_times': position['so_list'].get('times', []),
@@ -1674,8 +1708,12 @@ def backtest_smartbot_v2_multi_portfolio(
                     'individual_positions': individual_positions
                 })
                 
-                print(f"✅ [{ timestamp.strftime('%Y-%m-%d')}] TAKE PROFIT {asset} @ ${current_price:.2f} | "
-                      f"SOs={position['so_count']} | PnL=${pnl:.2f} ({pnl_pct:.2f}%)")
+                if exit_reason == "TP":
+                    print(f"✅ [{timestamp.strftime('%Y-%m-%d')}] TAKE PROFIT {asset} @ ${current_price:.2f} | "
+                          f"SOs={position['so_count']} | PnL=${pnl:.2f} ({pnl_pct:.2f}%)")
+                else:  # TIME_SL
+                    print(f"⏰ [{timestamp.strftime('%Y-%m-%d')}] TIME SL ({parametres.max_hold_time_days} days) {asset} @ ${current_price:.2f} | "
+                          f"SOs={position['so_count']} | PnL=${pnl:.2f} ({pnl_pct:.2f}%)")
                 
                 del positions_ouvertes[asset]
                 continue
