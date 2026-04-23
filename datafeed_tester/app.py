@@ -4771,7 +4771,7 @@ def optimize_multi_symbols():
         import os
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from optimizer import ParameterRange
-        from backtester_exact import ParametresDCA_SmartBotV2, backtest_smartbot_v2
+        from backtester_exact import ParametresDCA_SmartBotV2, backtest_smartbot_v2_multi_portfolio
         from datetime import datetime as dt, timezone
         from dataclasses import replace
         from itertools import product
@@ -4930,77 +4930,65 @@ def optimize_multi_symbols():
             # Créer les paramètres avec cette configuration
             test_params = replace(base_params, **param_dict)
             
-            # Variables d'agrégation pour le portefeuille
-            portfolio_pnl = 0.0
-            portfolio_initial_capital = 0.0
-            portfolio_final_capital = 0.0
-            portfolio_trades = 0
-            portfolio_winning_trades = 0
-            portfolio_max_drawdown_sum = 0.0
-            symbol_results = {}
-            
-            # Backtester sur chaque symbole avec ces paramètres
-            for symbol, df in symbol_data.items():
-                try:
-                    trades, equity, stats = backtest_smartbot_v2(df, test_params)
-                    
-                    # Agréger les résultats
-                    portfolio_pnl += stats["total_pnl"]
-                    portfolio_initial_capital += stats.get("initial_capital", test_params.initial_capital)
-                    portfolio_final_capital += stats["final_capital"]
-                    portfolio_trades += stats["total_trades"]
-                    portfolio_winning_trades += stats["winning_trades"]
-                    portfolio_max_drawdown_sum += abs(stats["max_drawdown_pct"])
-                    
-                    # Stocker les résultats par symbole
-                    symbol_results[symbol] = {
-                        "pnl": stats["total_pnl"],
-                        "return_pct": stats["capital_return_pct"],
-                        "trades": stats["total_trades"],
-                        "win_rate": stats["win_rate_tradingview"]
-                    }
-                    
-                except Exception as e:
-                    print(f"❌ Erreur backtest {symbol} (config {config_idx}): {str(e)}")
-                    continue
-            
-            # Calculer les métriques du portefeuille
-            if portfolio_initial_capital > 0:
-                portfolio_return_pct = (portfolio_pnl / portfolio_initial_capital) * 100
-            else:
-                portfolio_return_pct = 0.0
-            
-            portfolio_avg_drawdown = portfolio_max_drawdown_sum / len(symbol_data) if symbol_data else 0.0
-            
-            if abs(portfolio_avg_drawdown) > 0.01:
-                gain_dd_ratio = portfolio_return_pct / abs(portfolio_avg_drawdown)
-            else:
-                gain_dd_ratio = portfolio_return_pct * 100
-            
-            portfolio_win_rate = (portfolio_winning_trades / portfolio_trades * 100) if portfolio_trades > 0 else 0.0
-            
-            # Stocker le résultat
-            result = {
-                **param_dict,
-                "total_pnl": portfolio_pnl,
-                "capital_return_pct": portfolio_return_pct,
-                "max_drawdown_pct": portfolio_avg_drawdown,
-                "gain_drawdown_ratio": gain_dd_ratio,
-                "final_capital": portfolio_final_capital,
-                "total_trades": portfolio_trades,
-                "win_rate": portfolio_win_rate,
-                "symbol_count": len(symbol_results),
-                "symbol_results": symbol_results
-            }
-            
-            all_results.append(result)
-            
-            # Affichage de progression
-            param_str = ", ".join([f"{k}={v}" for k, v in param_dict.items()])
-            print(f"[{config_idx}/{len(all_combinations)}] {param_str} | "
-                  f"Portfolio PnL: ${portfolio_pnl:>10.2f} | "
-                  f"Return: {portfolio_return_pct:>6.2f}% | "
-                  f"Ratio: {gain_dd_ratio:>6.2f}")
+            try:
+                # Utiliser backtest_smartbot_v2_multi_portfolio pour gérer max_active_trades correctement
+                per_asset_trades, per_asset_equity, per_asset_stats, combined_equity, combined_stats = \
+                    backtest_smartbot_v2_multi_portfolio(symbol_data, test_params)
+                
+                # Les résultats sont déjà agrégés par la fonction multi_portfolio
+                portfolio_pnl = combined_stats["total_pnl"]
+                portfolio_return_pct = combined_stats["capital_return_pct"]
+                portfolio_trades = combined_stats["total_trades"]
+                portfolio_winning_trades = combined_stats["winning_trades"]
+                portfolio_max_drawdown = combined_stats["max_drawdown_pct"]
+                portfolio_win_rate = combined_stats["win_rate_tradingview"]
+                
+                # Stocker les résultats par symbole
+                symbol_results = {}
+                for symbol in symbol_data.keys():
+                    if symbol in per_asset_stats:
+                        symbol_results[symbol] = {
+                            "pnl": per_asset_stats[symbol]["total_pnl"],
+                            "return_pct": per_asset_stats[symbol]["capital_return_pct"],
+                            "trades": per_asset_stats[symbol]["total_trades"],
+                            "win_rate": per_asset_stats[symbol]["win_rate_tradingview"]
+                        }
+                
+                # Calculer le ratio gain/drawdown
+                if abs(portfolio_max_drawdown) > 0.01:
+                    gain_dd_ratio = portfolio_return_pct / abs(portfolio_max_drawdown)
+                else:
+                    gain_dd_ratio = portfolio_return_pct * 100
+                
+                # Stocker le résultat
+                result = {
+                    **param_dict,
+                    "total_pnl": portfolio_pnl,
+                    "capital_return_pct": portfolio_return_pct,
+                    "max_drawdown_pct": portfolio_max_drawdown,
+                    "gain_drawdown_ratio": gain_dd_ratio,
+                    "final_capital": combined_stats["final_capital"],
+                    "total_trades": portfolio_trades,
+                    "win_rate": portfolio_win_rate,
+                    "symbol_count": len(symbol_results),
+                    "symbol_results": symbol_results
+                }
+                
+                all_results.append(result)
+                
+                # Affichage de progression
+                param_str = ", ".join([f"{k}={v}" for k, v in param_dict.items()])
+                print(f"[{config_idx}/{len(all_combinations)}] {param_str} | "
+                      f"Portfolio PnL: ${portfolio_pnl:>10.2f} | "
+                      f"Return: {portfolio_return_pct:>6.2f}% | "
+                      f"Ratio: {gain_dd_ratio:>6.2f} | "
+                      f"Trades: {portfolio_trades}")
+                      
+            except Exception as e:
+                print(f"❌ Erreur backtest portfolio (config {config_idx}): {str(e)}")
+                import traceback
+                traceback.print_exc()
+                continue
         
         if not all_results:
             return jsonify({"error": "Aucun résultat d'optimisation obtenu"}), 400
