@@ -4747,6 +4747,304 @@ def optimize_grid_search():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/optimize-multi-symbols', methods=['POST'])
+def optimize_multi_symbols():
+    """
+    Optimise les paramètres sur un portefeuille multi-symboles
+    Teste chaque configuration sur TOUS les symboles en même temps et agrège les résultats
+    
+    Body JSON requis:
+    {
+        "symbols": ["BTC", "ETH", "SOL"] ou "BTC,ETH,SOL",
+        "exchange": "binance",
+        "timeframe": "1d",
+        "start_date": "2024-01-01",
+        "end_date": "2025-01-01",
+        "parameters": [
+            {"name": "rsi_length", "min_value": 2, "max_value": 10, "step": 1, "type": "int"}
+        ],
+        "base_params": { ... }  // Paramètres de base SmartBot V2
+    }
+    """
+    try:
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from optimizer import ParameterRange
+        from backtester_exact import ParametresDCA_SmartBotV2, backtest_smartbot_v2
+        from datetime import datetime as dt, timezone
+        from dataclasses import replace
+        from itertools import product
+        
+        data = request.json
+        
+        # Gestion des symboles (liste ou string)
+        symbols_input = data.get('symbols', [])
+        if isinstance(symbols_input, str):
+            symbols = [s.strip().upper() for s in symbols_input.split(',') if s.strip()]
+        else:
+            symbols = [s.strip().upper() for s in symbols_input if s.strip()]
+        
+        if not symbols:
+            return jsonify({"error": "Au moins un symbole doit être fourni"}), 400
+        
+        exchange_name = data.get('exchange', 'binance')
+        timeframe = data.get('timeframe', '1d')
+        start_date = data.get('start_date', '2024-01-01')
+        end_date = data.get('end_date', '2025-01-01')
+        quote = data.get('quote', 'USD' if exchange_name.lower() == 'alpaca' else 'USDT')
+        
+        print(f"🔍 Optimisation PORTEFEUILLE multi-symboles: {len(symbols)} symboles sur {exchange_name}")
+        print(f"📊 Symboles: {', '.join(symbols)}")
+        
+        # Paramètres à optimiser
+        param_configs = data.get('parameters', [])
+        if not param_configs:
+            return jsonify({"error": "Au moins un paramètre à optimiser doit être fourni"}), 400
+        
+        # Créer les objets ParameterRange
+        parameter_ranges = []
+        for pc in param_configs:
+            parameter_ranges.append(ParameterRange(
+                name=pc['name'],
+                min_value=pc['min_value'],
+                max_value=pc['max_value'],
+                step=pc.get('step', 1),
+                type=pc.get('type', 'int')
+            ))
+        
+        # Paramètres de base
+        base_params_dict = data.get('base_params', {})
+        base_params = ParametresDCA_SmartBotV2(**base_params_dict)
+        
+        # Dates
+        start_dt = dt.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        end_dt = dt.strptime(end_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        since_ms = int(start_dt.timestamp() * 1000)
+        until_ms = int(end_dt.timestamp() * 1000)
+        
+        timeframe_map = {'1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d'}
+        tf = timeframe_map.get(timeframe, '1d')
+        
+        # ================================================================
+        # ÉTAPE 1: Télécharger TOUTES les données pour tous les symboles
+        # ================================================================
+        print(f"\n{'='*70}")
+        print(f"📥 Téléchargement des données pour {len(symbols)} symboles...")
+        print(f"{'='*70}")
+        
+        symbol_data = {}  # Dict: symbol -> DataFrame
+        
+        for symbol in symbols:
+            try:
+                if exchange_name.lower() == "alpaca":
+                    df = fetch_ohlcv(
+                        exchange="alpaca",
+                        symbol=symbol,
+                        timeframe=tf,
+                        since_ms=since_ms,
+                        until_ms=until_ms
+                    )
+                else:
+                    from fetcher import compare_exchanges_on_bases, expand_coin_inputs
+                    expanded = expand_coin_inputs([symbol])
+                    exchanges_list = ['binance', 'coinbase', 'kraken', 'kucoin', 'okx']
+                    if exchange_name.lower() in exchanges_list:
+                        exchanges_list = [exchange_name.lower()] + [e for e in exchanges_list if e != exchange_name.lower()]
+                    
+                    agg, detail, fetch_data = compare_exchanges_on_bases(
+                        exchanges=exchanges_list,
+                        bases=expanded,
+                        quote=quote,
+                        timeframe=tf,
+                        since_ms=since_ms,
+                        until_ms=until_ms
+                    )
+                    
+                    if symbol not in fetch_data or fetch_data[symbol].empty:
+                        print(f"❌ Aucune donnée pour {symbol}, ignoré")
+                        continue
+                    
+                    df = fetch_data[symbol]
+                
+                if df.empty:
+                    print(f"❌ Aucune donnée pour {symbol}, ignoré")
+                    continue
+                
+                # Préparation du DataFrame
+                if 'date' in df.columns:
+                    df = df.set_index('date')
+                elif 'timestamp' in df.columns:
+                    df.index = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+                    df = df.drop('timestamp', axis=1, errors='ignore')
+                
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+                
+                df = df.drop(['exchange', 'pair'], axis=1, errors='ignore')
+                df = df.rename(columns={
+                    'open': 'Open',
+                    'high': 'High',
+                    'low': 'Low',
+                    'close': 'Close',
+                    'volume': 'Volume'
+                })
+                
+                symbol_data[symbol] = df
+                print(f"✅ {symbol}: {len(df)} bougies téléchargées")
+                
+            except Exception as e:
+                print(f"❌ Erreur téléchargement {symbol}: {str(e)}")
+                continue
+        
+        if not symbol_data:
+            return jsonify({"error": "Aucune donnée disponible pour les symboles demandés"}), 400
+        
+        print(f"\n✅ {len(symbol_data)} symboles chargés avec succès")
+        
+        # ================================================================
+        # ÉTAPE 2: Générer toutes les combinaisons de paramètres
+        # ================================================================
+        param_names = [pr.name for pr in parameter_ranges]
+        param_values_lists = [pr.get_values() for pr in parameter_ranges]
+        all_combinations = list(product(*param_values_lists))
+        
+        print(f"\n{'='*70}")
+        print(f"🔍 OPTIMISATION DU PORTEFEUILLE")
+        print(f"{'='*70}")
+        print(f"Paramètres: {', '.join(param_names)}")
+        print(f"Configurations à tester: {len(all_combinations)}")
+        print(f"Symboles dans le portefeuille: {len(symbol_data)}")
+        print(f"Total de backtests: {len(all_combinations) * len(symbol_data)}")
+        print(f"{'='*70}\n")
+        
+        # ================================================================
+        # ÉTAPE 3: Tester chaque configuration sur TOUS les symboles
+        # ================================================================
+        all_results = []
+        
+        for config_idx, param_values in enumerate(all_combinations, 1):
+            # Créer le dict de paramètres
+            param_dict = dict(zip(param_names, param_values))
+            
+            # Créer les paramètres avec cette configuration
+            test_params = replace(base_params, **param_dict)
+            
+            # Variables d'agrégation pour le portefeuille
+            portfolio_pnl = 0.0
+            portfolio_initial_capital = 0.0
+            portfolio_final_capital = 0.0
+            portfolio_trades = 0
+            portfolio_winning_trades = 0
+            portfolio_max_drawdown_sum = 0.0
+            symbol_results = {}
+            
+            # Backtester sur chaque symbole avec ces paramètres
+            for symbol, df in symbol_data.items():
+                try:
+                    trades, equity, stats = backtest_smartbot_v2(df, test_params)
+                    
+                    # Agréger les résultats
+                    portfolio_pnl += stats["total_pnl"]
+                    portfolio_initial_capital += stats.get("initial_capital", test_params.initial_capital)
+                    portfolio_final_capital += stats["final_capital"]
+                    portfolio_trades += stats["total_trades"]
+                    portfolio_winning_trades += stats["winning_trades"]
+                    portfolio_max_drawdown_sum += abs(stats["max_drawdown_pct"])
+                    
+                    # Stocker les résultats par symbole
+                    symbol_results[symbol] = {
+                        "pnl": stats["total_pnl"],
+                        "return_pct": stats["capital_return_pct"],
+                        "trades": stats["total_trades"],
+                        "win_rate": stats["win_rate_tradingview"]
+                    }
+                    
+                except Exception as e:
+                    print(f"❌ Erreur backtest {symbol} (config {config_idx}): {str(e)}")
+                    continue
+            
+            # Calculer les métriques du portefeuille
+            if portfolio_initial_capital > 0:
+                portfolio_return_pct = (portfolio_pnl / portfolio_initial_capital) * 100
+            else:
+                portfolio_return_pct = 0.0
+            
+            portfolio_avg_drawdown = portfolio_max_drawdown_sum / len(symbol_data) if symbol_data else 0.0
+            
+            if abs(portfolio_avg_drawdown) > 0.01:
+                gain_dd_ratio = portfolio_return_pct / abs(portfolio_avg_drawdown)
+            else:
+                gain_dd_ratio = portfolio_return_pct * 100
+            
+            portfolio_win_rate = (portfolio_winning_trades / portfolio_trades * 100) if portfolio_trades > 0 else 0.0
+            
+            # Stocker le résultat
+            result = {
+                **param_dict,
+                "total_pnl": portfolio_pnl,
+                "capital_return_pct": portfolio_return_pct,
+                "max_drawdown_pct": portfolio_avg_drawdown,
+                "gain_drawdown_ratio": gain_dd_ratio,
+                "final_capital": portfolio_final_capital,
+                "total_trades": portfolio_trades,
+                "win_rate": portfolio_win_rate,
+                "symbol_count": len(symbol_results),
+                "symbol_results": symbol_results
+            }
+            
+            all_results.append(result)
+            
+            # Affichage de progression
+            param_str = ", ".join([f"{k}={v}" for k, v in param_dict.items()])
+            print(f"[{config_idx}/{len(all_combinations)}] {param_str} | "
+                  f"Portfolio PnL: ${portfolio_pnl:>10.2f} | "
+                  f"Return: {portfolio_return_pct:>6.2f}% | "
+                  f"Ratio: {gain_dd_ratio:>6.2f}")
+        
+        if not all_results:
+            return jsonify({"error": "Aucun résultat d'optimisation obtenu"}), 400
+        
+        # Trier par ratio gain/drawdown
+        all_results_sorted = sorted(all_results, key=lambda r: r.get('gain_drawdown_ratio', 0), reverse=True)
+        
+        best_result = all_results_sorted[0]
+        
+        print(f"\n{'='*70}")
+        print(f"✅ Optimisation terminée!")
+        print(f"{'='*70}")
+        print(f"Meilleur résultat:")
+        print(f"  Paramètres: {', '.join([f'{k}={best_result[k]}' for k in param_names])}")
+        print(f"  Portfolio PnL: ${best_result['total_pnl']:,.2f}")
+        print(f"  Return: {best_result['capital_return_pct']:.2f}%")
+        print(f"  Ratio G/DD: {best_result['gain_drawdown_ratio']:.2f}")
+        print(f"{'='*70}\n")
+        
+        return jsonify({
+            "success": True,
+            "total_symbols": len(symbols),
+            "successful_symbols": len(symbol_data),
+            "total_configurations": len(all_results),
+            "parameters": param_names,
+            "top_results": all_results_sorted[:50],
+            "all_results": all_results_sorted,
+            "best_result": best_result,
+            "summary": {
+                "best_pnl": best_result['total_pnl'],
+                "best_return": best_result['capital_return_pct'],
+                "best_ratio": best_result['gain_drawdown_ratio'],
+                "avg_pnl": sum(r['total_pnl'] for r in all_results) / len(all_results),
+                "avg_ratio": sum(r['gain_drawdown_ratio'] for r in all_results) / len(all_results)
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Erreur dans optimize_multi_symbols: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 # -----------------------------------------------------------------------------
 # POINT D'ENTRÉE
 # -----------------------------------------------------------------------------

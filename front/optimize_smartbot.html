@@ -497,10 +497,10 @@
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label id="assetLabel">Asset
-                                        <span class="label-help" id="assetHelp">Ex: BTC, ETH, SOL</span>
+                                    <label id="assetLabel">Asset(s)
+                                        <span class="label-help" id="assetHelp">Ex: BTC,ETH,SOL or BTC (comma-separated)</span>
                                     </label>
-                                    <input type="text" id="symbol" value="BTC" required>
+                                    <input type="text" id="symbol" value="BTC" required placeholder="Enter symbol(s)">
                                 </div>
                                 <div class="form-group">
                                     <label>Timeframe</label>
@@ -604,6 +604,12 @@
                                         <span class="label-help">Starting balance</span>
                                     </label>
                                     <input type="number" id="initial_capital" value="100000" min="1000" step="1000">
+                                </div>
+                                <div class="form-group">
+                                    <label>Max Active Trades
+                                        <span class="label-help">Max simultaneous positions</span>
+                                    </label>
+                                    <input type="number" id="max_active_trades" value="3" min="1" max="10" step="1">
                                 </div>
                             </div>
                         </div>
@@ -716,6 +722,9 @@
                                         <option value="max_safe_order">Max Safety Orders</option>
                                         <option value="price_deviation">Price Deviation</option>
                                     </optgroup>
+                                    <optgroup label="System">
+                                        <option value="max_active_trades">Max Active Trades</option>
+                                    </optgroup>
                                     <optgroup label="Exit Strategy">
                                         <option value="take_profit">Take Profit %</option>
                                         <option value="max_hold_time_days">Max Hold Time (days)</option>
@@ -783,10 +792,10 @@
             
             if (exchange === 'alpaca') {
                 symbolField.value = 'AAPL';
-                assetHelp.textContent = 'Ex: AAPL, TSLA, NVDA';
+                assetHelp.textContent = 'Ex: AAPL,TSLA,NVDA or AAPL (comma-separated for multi-symbol)';
             } else {
                 symbolField.value = 'BTC';
-                assetHelp.textContent = 'Ex: BTC, ETH, SOL';
+                assetHelp.textContent = 'Ex: BTC,ETH,SOL or BTC (comma-separated for multi-symbol)';
             }
         }
 
@@ -905,14 +914,25 @@
             const exchange = document.getElementById('exchange').value;
             const quote = exchange === 'alpaca' ? 'USD' : 'USDT';
             
+            // Gestion des symboles (single ou multi)
+            const symbolInput = document.getElementById('symbol').value.trim();
+            const symbols = symbolInput.includes(',') 
+                ? symbolInput.split(',').map(s => s.trim()).filter(s => s) 
+                : [symbolInput];
+            
+            const isMultiSymbol = symbols.length > 1;
+            
             // Auto-detect mode based on parameter count
             currentMode = parameters.length === 1 ? 'single' : 'grid';
             
             console.log('Mode détecté:', currentMode);
             console.log('Nombre de paramètres:', parameters.length);
+            console.log('Nombre de symboles:', symbols.length);
+            console.log('Multi-symbole:', isMultiSymbol);
 
             const config = {
-                symbol: document.getElementById('symbol').value,
+                symbol: symbols.length === 1 ? symbols[0] : undefined,
+                symbols: isMultiSymbol ? symbols : undefined,
                 quote: quote,
                 exchange: exchange,
                 timeframe: document.getElementById('timeframe').value,
@@ -943,6 +963,7 @@
                     bb_threshold_low: 0.0,
                     mfi_length: parseInt(document.getElementById('mfi_length').value),
                     mfi_threshold_low: parseInt(document.getElementById('mfi_threshold').value),
+                    max_active_trades: parseInt(document.getElementById('max_active_trades').value),
                     initial_capital: parseFloat(document.getElementById('initial_capital').value),
                     commission: parseFloat(document.getElementById('commission').value) / 100,
                     slippage_pourcent: 0.0,
@@ -961,7 +982,28 @@
             try {
                 let endpoint, body;
 
-                if (currentMode === 'single') {
+                // Si multi-symboles, utiliser la route spéciale
+                if (isMultiSymbol) {
+                    endpoint = '/optimize-multi-symbols';
+                    body = {
+                        symbols: symbols,
+                        quote: quote,
+                        exchange: exchange,
+                        timeframe: config.timeframe,
+                        start_date: config.start_date,
+                        end_date: config.end_date,
+                        parameters: parameters.map(p => ({
+                            name: p.name,
+                            min_value: p.min,
+                            max_value: p.max,
+                            step: p.step,
+                            type: p.type
+                        })),
+                        base_params: config.base_params
+                    };
+                    
+                    document.getElementById('loadingText').textContent = `Optimizing ${symbols.length} symbols... This may take a while.`;
+                } else if (currentMode === 'single') {
                     endpoint = '/optimize-single-parameter';
                     body = {
                         ...config,
@@ -1029,6 +1071,12 @@
             
             section.classList.add('show');
 
+            // Détection du mode multi-symboles (portefeuille)
+            if (data.top_results && data.top_results.length > 0 && data.top_results[0].symbol_results) {
+                displayPortfolioResults(data);
+                return;
+            }
+
             const topResults = data.top_results.slice(0, 20);
             
             let html = `
@@ -1083,6 +1131,140 @@
 
             content.innerHTML = html;
             section.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function displayPortfolioResults(data) {
+            const content = document.getElementById('resultsContent');
+            
+            const topResults = data.top_results.slice(0, 20);
+            const bestResult = data.best_result;
+            const summary = data.summary;
+            
+            let html = `
+                <div class="info-box" style="margin-top: 20px;">
+                    <strong>📊 Portfolio Optimization Results</strong><br>
+                    Symbols: <strong>${data.successful_symbols}</strong> | 
+                    Configurations Tested: <strong>${data.total_configurations}</strong> | 
+                    Parameters: <strong>${data.parameters.join(', ')}</strong>
+                </div>
+
+                <div class="info-box" style="margin-top: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    <h3 style="margin: 0 0 10px 0;">🏆 Best Portfolio Configuration</h3>
+                    <strong>Parameters:</strong> ${data.parameters.map(p => `${p}=${bestResult[p]}`).join(', ')}<br>
+                    <strong>Portfolio PnL:</strong> $${bestResult.total_pnl.toFixed(2)}<br>
+                    <strong>Return:</strong> ${bestResult.capital_return_pct.toFixed(2)}%<br>
+                    <strong>Ratio Gain/DD:</strong> ${bestResult.gain_drawdown_ratio.toFixed(2)}<br>
+                    <strong>Total Trades:</strong> ${bestResult.total_trades}<br>
+                    <strong>Win Rate:</strong> ${bestResult.win_rate.toFixed(1)}%
+                </div>
+
+                <div class="info-box" style="margin-top: 15px;">
+                    <h3 style="margin: 0 0 10px 0;">📈 Summary Statistics</h3>
+                    <strong>Best Portfolio PnL:</strong> $${summary.best_pnl.toFixed(2)}<br>
+                    <strong>Best Return:</strong> ${summary.best_return.toFixed(2)}%<br>
+                    <strong>Best Ratio G/DD:</strong> ${summary.best_ratio.toFixed(2)}<br>
+                    <strong>Average PnL (all configs):</strong> $${summary.avg_pnl.toFixed(2)}<br>
+                    <strong>Average Ratio (all configs):</strong> ${summary.avg_ratio.toFixed(2)}
+                </div>
+
+                <h3 style="margin-top: 30px;">🔝 Top 20 Portfolio Configurations</h3>
+                <div style="overflow-x: auto;">
+                    <table class="results-table">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                ${parameters.map(p => `<th>${p.label}</th>`).join('')}
+                                <th>Portfolio PnL</th>
+                                <th>Return %</th>
+                                <th>Avg DD %</th>
+                                <th>Ratio G/DD</th>
+                                <th>Win Rate %</th>
+                                <th>Trades</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            topResults.forEach((result, index) => {
+                const badgeClass = index === 0 ? 'badge-gold' : index === 1 ? 'badge-silver' : index === 2 ? 'badge-bronze' : '';
+                const badge = badgeClass ? `<span class="badge ${badgeClass}">#${index + 1}</span>` : `#${index + 1}`;
+
+                html += `
+                    <tr onclick="showSymbolBreakdown('${index}')" style="cursor: pointer;" title="Click to see symbol breakdown">
+                        <td>${badge}</td>
+                        ${parameters.map(p => `<td><strong>${result[p.name]}</strong></td>`).join('')}
+                        <td class="${result.total_pnl >= 0 ? 'positive' : 'negative'}">$${result.total_pnl.toFixed(2)}</td>
+                        <td class="${result.capital_return_pct >= 0 ? 'positive' : 'negative'}">${result.capital_return_pct.toFixed(2)}%</td>
+                        <td class="negative">${result.max_drawdown_pct.toFixed(2)}%</td>
+                        <td><strong>${result.gain_drawdown_ratio.toFixed(2)}</strong></td>
+                        <td>${result.win_rate.toFixed(1)}%</td>
+                        <td>${result.total_trades}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+
+                <h3 style="margin-top: 30px;">💼 Best Configuration - Symbol Breakdown</h3>
+                <div style="overflow-x: auto;">
+                    <table class="results-table">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>PnL</th>
+                                <th>Return %</th>
+                                <th>Trades</th>
+                                <th>Win Rate %</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            Object.entries(bestResult.symbol_results).forEach(([symbol, symbolData]) => {
+                html += `
+                    <tr>
+                        <td><strong>${symbol}</strong></td>
+                        <td class="${symbolData.pnl >= 0 ? 'positive' : 'negative'}">$${symbolData.pnl.toFixed(2)}</td>
+                        <td class="${symbolData.return_pct >= 0 ? 'positive' : 'negative'}">${symbolData.return_pct.toFixed(2)}%</td>
+                        <td>${symbolData.trades}</td>
+                        <td>${symbolData.win_rate.toFixed(1)}%</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            content.innerHTML = html;
+            
+            // Stocker les résultats pour les breakdowns
+            window.portfolioResults = topResults;
+            
+            document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function showSymbolBreakdown(index) {
+            const result = window.portfolioResults[parseInt(index)];
+            if (!result || !result.symbol_results) return;
+            
+            const paramStr = parameters.map(p => `${p.name}=${result[p.name]}`).join(', ');
+            
+            let message = `Configuration: ${paramStr}\n\n`;
+            message += `Portfolio Total: $${result.total_pnl.toFixed(2)} (${result.capital_return_pct.toFixed(2)}%)\n\n`;
+            message += `Symbol Breakdown:\n`;
+            message += `${'='.repeat(50)}\n`;
+            
+            Object.entries(result.symbol_results).forEach(([symbol, data]) => {
+                message += `${symbol}: $${data.pnl.toFixed(2)} (${data.return_pct.toFixed(2)}%) - ${data.trades} trades\n`;
+            });
+            
+            alert(message);
         }
 
         function exportCSV() {

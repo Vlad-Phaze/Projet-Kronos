@@ -432,6 +432,7 @@ if __name__ == "__main__":
         dsc_rsi_threshold_low=3,
         
         # System
+        max_active_trades=3,
         initial_capital=100000.0,
         commission=0.001,
     )

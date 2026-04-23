@@ -77,6 +77,7 @@ class ParametresDCA_SmartBotV2:
     # ═══════════════════════════════════════════════════════════
     # SYSTEM SETTINGS
     # ═══════════════════════════════════════════════════════════
+    max_active_trades: int = 3  # Maximum simultaneous positions
     initial_capital: float = 100000.0  # Starting capital ($)
     commission: float = 0.001  # 0.1%
     slippage_pourcent: float = 0.0
@@ -1574,7 +1575,7 @@ def _calculate_individual_positions_multi(
 def backtest_smartbot_v2_multi_portfolio(
     assets_data: Dict[str, pd.DataFrame],
     parametres: ParametresDCA_SmartBotV2,
-    max_active_trades: int = 3
+    max_active_trades: Optional[int] = None
 ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.Series], Dict[str, Dict], pd.Series, Dict]:
     """
     Backtest SmartBot V2 avec gestion de portfolio multi-assets
@@ -1582,11 +1583,15 @@ def backtest_smartbot_v2_multi_portfolio(
     Args:
         assets_data: Dict {asset_name: DataFrame avec OHLCV}
         parametres: Paramètres SmartBot V2
-        max_active_trades: Nombre maximum de positions simultanées
+        max_active_trades: Nombre maximum de positions simultanées (None = use parametres.max_active_trades)
         
     Returns:
         (per_asset_trades, per_asset_equity, per_asset_stats, combined_equity, combined_stats)
     """
+    
+    # Utiliser max_active_trades de parametres si non spécifié
+    if max_active_trades is None:
+        max_active_trades = parametres.max_active_trades
     
     print("="*80)
     print("🚨 MULTI-PORTFOLIO AVEC trade_id=f'{asset}_{idx}' CHARGÉ!")
