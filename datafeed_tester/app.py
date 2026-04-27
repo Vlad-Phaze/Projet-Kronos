@@ -4936,22 +4936,27 @@ def optimize_multi_symbols():
                     backtest_smartbot_v2_multi_portfolio(symbol_data, test_params)
                 
                 # Les résultats sont déjà agrégés par la fonction multi_portfolio
-                portfolio_pnl = combined_stats["total_pnl"]
-                portfolio_return_pct = combined_stats["capital_return_pct"]
-                portfolio_trades = combined_stats["total_trades"]
-                portfolio_winning_trades = combined_stats["winning_trades"]
-                portfolio_max_drawdown = combined_stats["max_drawdown_pct"]
-                portfolio_win_rate = combined_stats["win_rate_tradingview"]
+                portfolio_pnl = combined_stats.get("total_pnl", 0)
+                portfolio_return_pct = combined_stats.get("total_return_pct", 0)
+                portfolio_trades = combined_stats.get("total_deals", 0)
+                # Calculer winning_trades depuis per_asset_stats si non disponible
+                all_positions = []
+                for asset_stats in per_asset_stats.values():
+                    if "individual_positions" in asset_stats:
+                        all_positions.extend(asset_stats["individual_positions"])
+                portfolio_winning_trades = sum(1 for p in all_positions if p.get("pnl", 0) > 0)
+                portfolio_max_drawdown = combined_stats.get("max_drawdown_pct", 0)
+                portfolio_win_rate = combined_stats.get("avg_win_rate_tradingview", combined_stats.get("avg_win_rate", 0))
                 
                 # Stocker les résultats par symbole
                 symbol_results = {}
                 for symbol in symbol_data.keys():
                     if symbol in per_asset_stats:
                         symbol_results[symbol] = {
-                            "pnl": per_asset_stats[symbol]["total_pnl"],
-                            "return_pct": per_asset_stats[symbol]["capital_return_pct"],
-                            "trades": per_asset_stats[symbol]["total_trades"],
-                            "win_rate": per_asset_stats[symbol]["win_rate_tradingview"]
+                            "pnl": per_asset_stats[symbol].get("total_pnl", 0),
+                            "trades": per_asset_stats[symbol].get("total_trades", 0),
+                            "deals": per_asset_stats[symbol].get("total_deals", 0),
+                            "win_rate": per_asset_stats[symbol].get("win_rate_tradingview", 0)
                         }
                 
                 # Calculer le ratio gain/drawdown

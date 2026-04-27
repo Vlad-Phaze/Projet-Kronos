@@ -468,6 +468,7 @@ def fetch_ohlcv_alpaca(symbol: str, timeframe: str,
             "1m": "1m",
             "5m": "5m",
             "15m": "15m",
+            "30m": "30m",
             "1h": "1h",
             "4h": "4h",  # Note: yfinance n'a pas 4h, on utilisera 1h
             "1d": "1d",
@@ -489,10 +490,18 @@ def fetch_ohlcv_alpaca(symbol: str, timeframe: str,
         end_dt = datetime.fromtimestamp(until_ms / 1000, tz=timezone.utc)
         
         # Yahoo Finance limite: données intraday (< 1d) seulement pour les 730 derniers jours
-        # Si la période demandée dépasse 730 jours et qu'on demande du intraday, basculer sur 1d
+        # Vérifier AUSSI que la date de début n'est pas trop ancienne
+        now_dt = datetime.now(tz=timezone.utc)
+        days_from_start = (now_dt - start_dt).days
         days_requested = (end_dt - start_dt).days
-        if days_requested > 730 and timeframe != "1d":
-            print(f'      ⚠️  Période de {days_requested} jours dépasse la limite de 730j pour {timeframe}', flush=True)
+        
+        # Si on demande intraday et que la date de début dépasse 730 jours, basculer sur 1d
+        if timeframe != "1d" and (days_requested > 730 or days_from_start > 730):
+            if days_from_start > 730:
+                print(f'      ⚠️  Date de début ({start_dt.strftime("%Y-%m-%d")}) dépasse la limite de 730j pour {timeframe}', flush=True)
+                print(f'      ⚠️  Yahoo Finance limite les données intraday aux 730 derniers jours uniquement', flush=True)
+            else:
+                print(f'      ⚠️  Période de {days_requested} jours dépasse la limite de 730j pour {timeframe}', flush=True)
             print(f'      ↪️  Bascule automatique sur timeframe 1d (données journalières)', flush=True)
             yf_interval = "1d"
             # Mettre à jour le cache key pour refléter le timeframe réel utilisé
