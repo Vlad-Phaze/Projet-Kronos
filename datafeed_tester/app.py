@@ -4938,7 +4938,8 @@ def optimize_multi_symbols():
                 # Les résultats sont déjà agrégés par la fonction multi_portfolio
                 portfolio_pnl = combined_stats.get("total_pnl", 0)
                 portfolio_return_pct = combined_stats.get("total_return_pct", 0)
-                portfolio_trades = combined_stats.get("total_deals", 0)
+                portfolio_trades = combined_stats.get("total_trades", 0)  # Nombre total de trades (BO + SO)
+                portfolio_deals = combined_stats.get("total_deals", 0)    # Nombre de deals (BO uniquement)
                 # Calculer winning_trades depuis per_asset_stats si non disponible
                 all_positions = []
                 for asset_stats in per_asset_stats.values():
