@@ -733,6 +733,7 @@
                                     <optgroup label="ATR">
                                         <option value="atr_length">ATR Length</option>
                                         <option value="atr_mult">ATR Multiplier</option>
+                                        <option value="atr_mult_step_scale">ATR Step Scale</option>
                                     </optgroup>
                                 </select>
                             </div>
@@ -844,6 +845,7 @@
                 max_hold_time_days: { min: 0, max: 14, step: 1, type: 'int' },
                 atr_length: { min: 7, max: 21, step: 1, type: 'int' },
                 atr_mult: { min: 1.0, max: 5.0, step: 0.5, type: 'float' },
+                atr_mult_step_scale: { min: 1.0, max: 2.0, step: 0.1, type: 'float' },
             };
 
             const def = defaults[paramName] || { min: 1, max: 10, step: 1, type: 'int' };
