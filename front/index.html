@@ -72,6 +72,31 @@
             margin-left: auto;
             margin-right: auto;
         }
+
+        .strategy-toggle {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .strategy-btn {
+            padding: 12px 20px;
+            border: 1px solid #1a1a1a;
+            border-radius: 999px;
+            background: #ffffff;
+            color: #1a1a1a;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .strategy-btn.active {
+            background: #1a1a1a;
+            color: #ffffff;
+        }
         
         .nav-btn {
             padding: 32px 24px;
@@ -154,20 +179,25 @@
         </div>
         
         <!-- Navigation Buttons -->
+        <div class="strategy-toggle">
+            <button type="button" class="strategy-btn active" id="btn-dca" onclick="setStrategy('dca')">Strategie DCA</button>
+            <button type="button" class="strategy-btn" id="btn-stop-loss" onclick="setStrategy('stop_loss')">Strategie Stop loss</button>
+        </div>
+
         <div class="nav-buttons">
-            <a href="configure_smartbot.html" class="nav-btn">
+            <a href="configure_smartbot.html?strategy=dca" class="nav-btn strategy-link" data-base="configure_smartbot.html">
                 <span class="label">Crypto Single</span>
                 <span class="description">Configuration individuelle</span>
             </a>
-            <a href="run_multi_smartbot.html" class="nav-btn">
+            <a href="run_multi_smartbot.html?strategy=dca" class="nav-btn strategy-link" data-base="run_multi_smartbot.html">
                 <span class="label">Crypto Multi</span>
                 <span class="description">Portfolio multi-actifs</span>
             </a>
-            <a href="configure_smartbot_stocks.html" class="nav-btn">
+            <a href="configure_smartbot_stocks.html?strategy=dca" class="nav-btn strategy-link" data-base="configure_smartbot_stocks.html">
                 <span class="label">Stock Single</span>
                 <span class="description">Actions individuelles</span>
             </a>
-            <a href="run_multi_smartbot_stocks.html" class="nav-btn">
+            <a href="run_multi_smartbot_stocks.html?strategy=dca" class="nav-btn strategy-link" data-base="run_multi_smartbot_stocks.html">
                 <span class="label">Stocks Multi</span>
                 <span class="description">Portfolio d'actions</span>
             </a>
@@ -177,5 +207,23 @@
     <footer>
         <p>© 2026 Kronos Capital – Backtesting professionnel</p>
     </footer>
+
+    <script>
+        let selectedStrategy = 'dca';
+
+        function setStrategy(strategy) {
+            selectedStrategy = strategy === 'stop_loss' ? 'stop_loss' : 'dca';
+
+            document.getElementById('btn-dca').classList.toggle('active', selectedStrategy === 'dca');
+            document.getElementById('btn-stop-loss').classList.toggle('active', selectedStrategy === 'stop_loss');
+
+            document.querySelectorAll('.strategy-link').forEach((link) => {
+                const base = link.getAttribute('data-base');
+                link.href = `${base}?strategy=${selectedStrategy}`;
+            });
+        }
+
+        setStrategy('dca');
+    </script>
 </body>
 </html>

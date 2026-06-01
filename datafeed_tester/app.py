@@ -3657,6 +3657,13 @@ def backtest_smartbot_v2_endpoint():
                 traceback.print_exc()
                 return jsonify({"error": f"Erreur fetcher: {str(e)}"}), 500
         
+        # Configuration du mode de stratégie
+        strategy_mode = data.get('strategy_mode', 'dca')
+        if strategy_mode not in ('dca', 'stop_loss'):
+            strategy_mode = 'dca'
+
+        max_safe_order_default = 20 if strategy_mode == 'dca' else 0
+
         # Configuration des paramètres SmartBot V2
         params = ParametresDCA_SmartBotV2(
             # DSC Configuration
@@ -3667,7 +3674,7 @@ def backtest_smartbot_v2_endpoint():
             # Order Settings
             base_order=float(data.get('base_order', 1000.0)),
             safe_order=float(data.get('safe_order', 1500.0)),
-            max_safe_order=int(data.get('max_so', 20)),
+            max_safe_order=int(data.get('max_so', max_safe_order_default)),
             safe_order_volume_scale=float(data.get('so_volume_scale', 1.5)),
             
             # Price Deviation Settings
@@ -3681,7 +3688,9 @@ def backtest_smartbot_v2_endpoint():
             atr_mult_step_scale=float(data.get('atr_step_scale', 1.2)),
             
             # Take Profit Settings
+            strategy_mode=strategy_mode,
             take_profit=float(data.get('take_profit', 1.5)),
+            stop_loss=float(data.get('stop_loss', 0.0)),
             tp_type=data.get('tp_type', 'From Average Entry'),
             
             # Indicator Settings: RSI
@@ -3904,11 +3913,20 @@ def create_plotly_price_chart(df_price, trades_df, title: str = "Price Chart"):
         # Marqueurs TP (Take Profit)
         tp_dates = []
         tp_prices = []
+        sl_dates = []
+        sl_prices = []
         for _, trade in trades_df.iterrows():
-            if 'exit_time' in trade and 'exit_price' in trade and pd.notna(trade['exit_time']):
+            if 'exit_time' not in trade or 'exit_price' not in trade or pd.isna(trade['exit_time']):
+                continue
+
+            reason = str(trade.get('reason', 'TP')).upper()
+            if reason == 'SL':
+                sl_dates.append(pd.to_datetime(trade['exit_time']).strftime('%Y-%m-%d'))
+                sl_prices.append(float(trade['exit_price']))
+            else:
                 tp_dates.append(pd.to_datetime(trade['exit_time']).strftime('%Y-%m-%d'))
                 tp_prices.append(float(trade['exit_price']))
-        
+
         if tp_dates:
             traces.append({
                 'type': 'scatter',
@@ -3919,6 +3937,19 @@ def create_plotly_price_chart(df_price, trades_df, title: str = "Price Chart"):
                 'text': ['TP'] * len(tp_dates),
                 'textposition': 'bottom center',
                 'marker': {'color': '#000000', 'size': 12, 'symbol': 'triangle-down'},
+                'showlegend': True
+            })
+
+        if sl_dates:
+            traces.append({
+                'type': 'scatter',
+                'mode': 'markers+text',
+                'x': sl_dates,
+                'y': sl_prices,
+                'name': 'Stop Loss',
+                'text': ['SL'] * len(sl_dates),
+                'textposition': 'bottom center',
+                'marker': {'color': '#d62728', 'size': 12, 'symbol': 'triangle-down'},
                 'showlegend': True
             })
 
@@ -3995,19 +4026,28 @@ def backtest_smartbot_v2_multi_endpoint():
         print(f"📅 Période: {start_date} → {end_date}")
         print(f"🎯 Max Active Trades: {max_active_trades}")
         
+        # Configuration du mode de stratégie
+        strategy_mode = data.get('strategy_mode', 'dca')
+        if strategy_mode not in ('dca', 'stop_loss'):
+            strategy_mode = 'dca'
+
+        max_safe_order_default = 20 if strategy_mode == 'dca' else 0
+
         # Configuration des paramètres SmartBot V2
         params = ParametresDCA_SmartBotV2(
             dsc=data.get('dsc', 'RSI + MFI'),
             base_order=float(data.get('base_order', 1000.0)),
             safe_order=float(data.get('safe_order', 1500.0)),
-            max_safe_order=int(data.get('max_so', 20)),
+            max_safe_order=int(data.get('max_so', max_safe_order_default)),
             safe_order_volume_scale=float(data.get('so_volume_scale', 1.5)),
             pricedevbase=data.get('pricedevbase', 'ATR'),
             price_deviation=float(data.get('price_deviation', 4.0)),
             atr_length=int(data.get('atr_length', 14)),
             atr_mult=float(data.get('atr_mult', 3.0)),
             atr_mult_step_scale=float(data.get('atr_step_scale', 1.2)),
+            strategy_mode=strategy_mode,
             take_profit=float(data.get('take_profit', 1.5)),
+            stop_loss=float(data.get('stop_loss', 0.0)),
             tp_type=data.get('tp_type', 'From Average Entry'),
             rsi_length=int(data.get('rsi_length', 2)),
             dsc_rsi_threshold_low=int(data.get('rsi_threshold', 3)),

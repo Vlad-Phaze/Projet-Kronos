@@ -42,7 +42,9 @@ class ParametresDCA_SmartBotV2:
     # ═══════════════════════════════════════════════════════════
     # TAKE PROFIT SETTINGS
     # ═══════════════════════════════════════════════════════════
+    strategy_mode: str = "dca"  # Options: "dca", "stop_loss"
     take_profit: float = 1.5  # Take Profit (%)
+    stop_loss: float = 0.0  # Stop Loss (%) - 0 désactive le SL
     tp_type: str = "From Average Entry"  # Options: "From Average Entry", "From Base Order"
     
     # ═══════════════════════════════════════════════════════════
@@ -334,6 +336,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     
     close = prix["Close"].to_numpy(dtype=float)
     high = prix["High"].to_numpy(dtype=float)
+    low = prix["Low"].to_numpy(dtype=float)
     n = len(close)
     indice = prix.index
     
@@ -378,6 +381,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     
     print(f"🚀 Début du backtest - {len(close)} barres")
     print(f"📋 Configuration: DSC='{parametres.dsc}', Price Deviation='{parametres.pricedevbase}'")
+    print(f"🧠 Mode stratégie: {parametres.strategy_mode} | TP={parametres.take_profit}% | SL={parametres.stop_loss}%")
     print(f"💰 Capital Initial=${parametres.initial_capital:.2f}")
     print(f"💰 Base Order=${parametres.base_order}, SO=${parametres.safe_order}, Max SO={parametres.max_safe_order}")
     print("="*80)
@@ -427,7 +431,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 print(f"📍 [{indice[t].strftime('%Y-%m-%d')}] BASE ORDER @ ${price:.2f} | Qty={qty:.6f} | Capital restant=${capital_disponible:.2f}")
         
         # ═══════════════════════════════════════════════════════════
-        # LOGIQUE DE SORTIE (TAKE PROFIT)
+        # LOGIQUE DE SORTIE (TAKE PROFIT / STOP LOSS)
         # ═══════════════════════════════════════════════════════════
         elif in_trade and t != entry_bar and market_bar_allowed:
             # Calculate TP price
@@ -435,17 +439,31 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 tp_price = avg_entry_price * (1 + parametres.take_profit / 100.0)
             else:  # From Base Order
                 tp_price = base_order_price * (1 + parametres.take_profit / 100.0)
+
+            sl_price = None
+            if parametres.stop_loss > 0:
+                sl_price = avg_entry_price * (1 - parametres.stop_loss / 100.0)
             
-            # Check TP on wick (high)
-            if high[t] >= tp_price:
+            # Priorité SL si TP+SL touchés sur la même bougie (hypothèse conservatrice).
+            tp_hit = high[t] >= tp_price
+            sl_hit = sl_price is not None and low[t] <= sl_price
+
+            if tp_hit or sl_hit:
                 # CLOSE DEAL
-                exit_price = tp_price  # Assume filled at TP price
+                if sl_hit:
+                    exit_price = sl_price
+                    exit_reason = "SL"
+                else:
+                    exit_price = tp_price
+                    exit_reason = "TP"
                 
                 # Calculate PnL
                 gross_proceeds = exit_price * total_position_size
                 total_fees = (total_invested + gross_proceeds) * parametres.commission
                 pnl_net = gross_proceeds - total_invested - total_fees
                 profit_pct = ((exit_price / avg_entry_price) - 1) * 100.0
+
+                signal_label = f"SL @ {parametres.stop_loss}%" if exit_reason == "SL" else f"TP @ {parametres.take_profit}%"
                 
                 # Calculer le P&L de chaque position individuelle (comme TradingView)
                 individual_positions = []
@@ -467,7 +485,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     "pnl": bo_pnl,
                     "pnl_pct": bo_pnl_pct,
                     "is_win": bo_pnl > 0,  # WIN si P&L individuel > 0
-                    "signal": f"TP @ {parametres.take_profit}%"
+                    "signal": signal_label
                 })
                 
                 # 2. Chaque Safety Order P&L
@@ -490,7 +508,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                         "pnl": so_pnl,
                         "pnl_pct": so_pnl_pct,
                         "is_win": so_pnl > 0,  # WIN si P&L individuel > 0
-                        "signal": f"TP @ {parametres.take_profit}%"
+                        "signal": signal_label
                     })
                 
                 transactions.append({
@@ -499,7 +517,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     "entry_price": base_order_price,
                     "avg_entry_price": avg_entry_price,
                     "exit_price": exit_price,
-                    "reason": "TP",
+                    "reason": exit_reason,
                     "so_count": current_so_count,
                     "so_times": [so['time'] for so in current_trade_so_list],
                     "so_prices": [so['price'] for so in current_trade_so_list],
@@ -519,7 +537,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     capital_history_array[capital_event_idx] = capital_disponible
                     capital_event_idx += 1
                 
-                print(f"✅ [{indice[t].strftime('%Y-%m-%d')}] TAKE PROFIT @ ${exit_price:.2f} | "
+                exit_label = "TAKE PROFIT" if exit_reason == "TP" else "STOP LOSS"
+                print(f"✅ [{indice[t].strftime('%Y-%m-%d')}] {exit_label} @ ${exit_price:.2f} | "
                       f"SOs={current_so_count} | PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital=${capital_disponible:.2f}")
                 
                 # Reset state
@@ -535,7 +554,12 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
         # ═══════════════════════════════════════════════════════════
         # LOGIQUE SAFETY ORDERS
         # ═══════════════════════════════════════════════════════════
-        if in_trade and current_so_count < parametres.max_safe_order and market_bar_allowed:
+        if (
+            parametres.strategy_mode == "dca"
+            and in_trade
+            and current_so_count < parametres.max_safe_order
+            and market_bar_allowed
+        ):
             # Calculate SO trigger price
             so_trigger_price = calcular_so_trigger_price(
                 parametres, base_order_price, last_so_price, current_so_count,
@@ -1483,7 +1507,8 @@ def _calculate_individual_positions_multi(
     exit_price: float,
     exit_time: pd.Timestamp,
     parametres: ParametresDCA_SmartBotV2,
-    is_win: bool
+    is_win: bool,
+    exit_reason: str = "TP"
 ) -> List[Dict]:
     """
     Calcule les positions individuelles pour un trade dans le multi-portfolio
@@ -1511,7 +1536,8 @@ def _calculate_individual_positions_multi(
         "exit_price": float(exit_price),
         "pnl": float(bo_pnl),
         "pnl_pct": float(bo_pnl_pct),
-        "is_win": bo_is_win
+        "is_win": bo_is_win,
+        "signal": exit_reason
     })
     
     # Safety Orders
@@ -1537,7 +1563,8 @@ def _calculate_individual_positions_multi(
             "exit_price": float(exit_price),
             "pnl": float(so_pnl),
             "pnl_pct": float(so_pnl_pct),
-            "is_win": so_is_win
+            "is_win": so_is_win,
+            "signal": exit_reason
         })
     
     return individual_positions
@@ -1637,12 +1664,24 @@ def backtest_smartbot_v2_multi_portfolio(
                 position['invested'] / position['quantity']
             )
             
-            # Vérifier la condition de Take Profit
+            # Vérifier la condition de sortie TP / SL
+            current_high = df['High'].iloc[idx] if 'High' in df.columns else current_price
+            current_low = df['Low'].iloc[idx] if 'Low' in df.columns else current_price
             tp_target = avg_entry * (1 + parametres.take_profit / 100)
-            
-            if market_bar_allowed and current_price >= tp_target:
-                # SORTIE : Take Profit
-                exit_value = position['quantity'] * current_price * (1 - parametres.commission)
+            sl_target = avg_entry * (1 - parametres.stop_loss / 100) if parametres.stop_loss > 0 else None
+            tp_hit = current_high >= tp_target
+            sl_hit = sl_target is not None and current_low <= sl_target
+
+            if market_bar_allowed and (tp_hit or sl_hit):
+                # SORTIE : priorité au SL si les 2 sont touchés sur la même bougie.
+                if sl_hit:
+                    exit_price = sl_target
+                    exit_reason = 'SL'
+                else:
+                    exit_price = tp_target
+                    exit_reason = 'TP'
+
+                exit_value = position['quantity'] * exit_price * (1 - parametres.commission)
                 pnl = exit_value - position['invested']
                 pnl_pct = (pnl / position['invested']) * 100
                 
@@ -1655,7 +1694,7 @@ def backtest_smartbot_v2_multi_portfolio(
                 # Calculer les positions individuelles
                 is_win = pnl > 0
                 individual_positions = _calculate_individual_positions_multi(
-                    position, current_price, timestamp, parametres, is_win
+                    position, exit_price, timestamp, parametres, is_win, exit_reason
                 )
                 
                 # Enregistrer le trade
@@ -1663,7 +1702,7 @@ def backtest_smartbot_v2_multi_portfolio(
                     'entry_time': position['entry_time'],
                     'entry_price': position['entry_price'],
                     'exit_time': timestamp,
-                    'exit_price': current_price,
+                    'exit_price': exit_price,
                     'quantity': position['quantity'],
                     'so_count': position['so_count'],
                     'so_times': position['so_list'].get('times', []),
@@ -1671,17 +1710,23 @@ def backtest_smartbot_v2_multi_portfolio(
                     'invested': position['invested'],
                     'pnl': pnl,
                     'pnl_pct': pnl_pct,
+                    'reason': exit_reason,
                     'individual_positions': individual_positions
                 })
                 
-                print(f"✅ [{ timestamp.strftime('%Y-%m-%d')}] TAKE PROFIT {asset} @ ${current_price:.2f} | "
+                exit_label = 'TAKE PROFIT' if exit_reason == 'TP' else 'STOP LOSS'
+                print(f"✅ [{ timestamp.strftime('%Y-%m-%d')}] {exit_label} {asset} @ ${exit_price:.2f} | "
                       f"SOs={position['so_count']} | PnL=${pnl:.2f} ({pnl_pct:.2f}%)")
                 
                 del positions_ouvertes[asset]
                 continue
             
             # Vérifier les conditions de Safety Order
-            if market_bar_allowed and position['so_count'] < parametres.max_safe_order:
+            if (
+                parametres.strategy_mode == "dca"
+                and market_bar_allowed
+                and position['so_count'] < parametres.max_safe_order
+            ):
                 atr = indicators['atr'][idx] if idx < len(indicators['atr']) else 0
                 
                 # Calculer le seuil de déclenchement du SO

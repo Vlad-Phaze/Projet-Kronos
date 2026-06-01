@@ -421,13 +421,13 @@
     <div class="container">
         <header>
             <h1>KRONOS CAPITAL BACKTESTEUR</h1>
-            <p class="subtitle">Portfolio multi-actifs SmartBot V2</p>
+            <p class="subtitle" id="strategySubtitle">Portfolio multi-actifs SmartBot V2 - Strategie DCA</p>
             <div class="nav-links">
                 <a href="index.html" class="nav-btn">Home</a>
-                <a href="configure_smartbot.html" class="nav-btn">Crypto Single</a>
-                <a href="run_multi_smartbot.html" class="nav-btn active">Crypto Multi</a>
-                <a href="configure_smartbot_stocks.html" class="nav-btn">Stock Single</a>
-                <a href="run_multi_smartbot_stocks.html" class="nav-btn">Stocks Multi</a>
+                <a href="configure_smartbot.html?strategy=dca" id="nav-crypto-single" class="nav-btn">Crypto Single</a>
+                <a href="run_multi_smartbot.html?strategy=dca" id="nav-crypto-multi" class="nav-btn active">Crypto Multi</a>
+                <a href="configure_smartbot_stocks.html?strategy=dca" id="nav-stock-single" class="nav-btn">Stock Single</a>
+                <a href="run_multi_smartbot_stocks.html?strategy=dca" id="nav-stocks-multi" class="nav-btn">Stocks Multi</a>
             </div>
         </header>
 
@@ -535,15 +535,11 @@
                                         <label>Base Order ($)</label>
                                         <input type="number" id="base_order" value="1000" min="1" step="1">
                                     </div>
-                                    <div class="form-group">
+                                    <div class="form-group dca-only">
                                         <label>Safety Order ($)</label>
                                         <input type="number" id="safe_order" value="1500" min="1" step="1">
                                     </div>
-                                    <div class="form-group">
-                                        <label>Max Safety Orders</label>
-                                        <input type="number" id="max_so" value="20" min="1" max="50">
-                                    </div>
-                                    <div class="form-group">
+                                    <div class="form-group dca-only">
                                         <label>SO Volume Scale
                                             <span class="label-help">Multiplier per SO</span>
                                         </label>
@@ -616,6 +612,10 @@
                                         <input type="number" id="take_profit" value="1.5" min="0.1" step="0.1">
                                     </div>
                                     <div class="form-group">
+                                        <label>Stop Loss (%)</label>
+                                        <input type="number" id="stop_loss" value="2.0" min="0.1" step="0.1">
+                                    </div>
+                                    <div class="form-group">
                                         <label>TP Type</label>
                                         <select id="tp_type">
                                             <option value="From Average Entry" selected>From Average Entry</option>
@@ -673,6 +673,37 @@
     </div>
 
     <script>
+        const strategyMode = new URLSearchParams(window.location.search).get('strategy') === 'stop_loss' ? 'stop_loss' : 'dca';
+
+        function strategyHref(page) {
+            return `${page}?strategy=${strategyMode}`;
+        }
+
+        function applyStrategyModeUi() {
+            const subtitle = document.getElementById('strategySubtitle');
+            if (subtitle) {
+                subtitle.textContent = strategyMode === 'stop_loss'
+                    ? 'Portfolio multi-actifs SmartBot V2 - Strategie Stop loss'
+                    : 'Portfolio multi-actifs SmartBot V2 - Strategie DCA';
+            }
+
+            const navCryptoSingle = document.getElementById('nav-crypto-single');
+            const navCryptoMulti = document.getElementById('nav-crypto-multi');
+            const navStockSingle = document.getElementById('nav-stock-single');
+            const navStocksMulti = document.getElementById('nav-stocks-multi');
+
+            if (navCryptoSingle) navCryptoSingle.href = strategyHref('configure_smartbot.html');
+            if (navCryptoMulti) navCryptoMulti.href = strategyHref('run_multi_smartbot.html');
+            if (navStockSingle) navStockSingle.href = strategyHref('configure_smartbot_stocks.html');
+            if (navStocksMulti) navStocksMulti.href = strategyHref('run_multi_smartbot_stocks.html');
+
+            document.querySelectorAll('.dca-only').forEach((element) => {
+                element.style.display = strategyMode === 'dca' ? '' : 'none';
+            });
+        }
+
+        applyStrategyModeUi();
+
         function toggleAccordion(index) {
             const targetHeader = document.querySelectorAll('.accordion-header')[index];
             const targetContent = document.querySelector(`.accordion-content[data-section="${index}"]`);
@@ -720,7 +751,6 @@
                 // Orders
                 base_order: parseFloat(document.getElementById('base_order').value),
                 safe_order: parseFloat(document.getElementById('safe_order').value),
-                max_so: parseInt(document.getElementById('max_so').value),
                 so_volume_scale: parseFloat(document.getElementById('so_volume_scale').value),
                 initial_capital: parseFloat(document.getElementById('initial_capital').value),
                 
@@ -732,7 +762,9 @@
                 atr_step_scale: parseFloat(document.getElementById('atr_step_scale').value),
                 
                 // TP
+                strategy_mode: strategyMode,
                 take_profit: parseFloat(document.getElementById('take_profit').value),
+                stop_loss: parseFloat(document.getElementById('stop_loss').value),
                 tp_type: document.getElementById('tp_type').value,
                 commission: parseFloat(document.getElementById('commission').value) / 100,
                 close_last_trade: document.getElementById('close_last_trade').value === 'true'
@@ -971,6 +1003,14 @@
             console.log('   max_capital_used_pct:', stats.max_capital_used_pct);
 
             const totalDeals = Number(stats.total_deals || stats.total_trades || 0);
+            const soStatsHtml = strategyMode === 'dca' ? `
+                <div class="stat-card">
+                    <div class="stat-label">Total SO Placed</div>
+                    <div class="stat-value">
+                        ${stats.total_so_placed || 0}
+                    </div>
+                </div>
+            ` : '';
 
             statsGrid.innerHTML = `
                 <div class="stat-card">
@@ -1007,12 +1047,7 @@
                         $${Math.abs(displayMaxDrawdown).toFixed(2)} (${Math.abs(displayMaxDrawdownPct).toFixed(2)}%)
                     </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-label">Total SO Placed</div>
-                    <div class="stat-value">
-                        ${stats.total_so_placed || 0}
-                    </div>
-                </div>
+                ${soStatsHtml}
                 <div class="stat-card">
                     <div class="stat-label">Assets Traded</div>
                     <div class="stat-value">
@@ -1092,6 +1127,11 @@
                 const assetDeals = positions.filter(p => String(p.type || '').startsWith('BO_')).length;
                 const assetAvgSo = assetDeals > 0 ? (assetSoPlaced / assetDeals) : 0;
                 
+                const soBreakdownHtml = strategyMode === 'dca' ? `
+                                <div><strong>SO Placed:</strong> ${assetSoPlaced}</div>
+                                <div><strong>Avg SO/Deal:</strong> ${assetAvgSo.toFixed(1)}</div>
+                ` : '';
+
                 perAssetHTML += `
                     <div style="background: #f5f5f5; border-left: 4px solid ${assetPnl >= 0 ? '#000000' : '#999999'}">
                         <div style="padding: 15px; cursor: pointer; user-select: none;" onclick="toggleChart('${chartId}', 'arrow-${asset}')">
@@ -1104,8 +1144,7 @@
                                 <div><strong>Positions:</strong> ${assetPositions}</div>
                                 <div title="Méthode TradingView: chaque position (BO, SO1, SO2...) compte séparément"><strong>Win Rate (TV):</strong> ${assetWinRate.toFixed(1)}%</div>
                                 <div><strong>PnL:</strong> $${assetPnl.toFixed(2)}</div>
-                                <div><strong>SO Placed:</strong> ${assetSoPlaced}</div>
-                                <div><strong>Avg SO/Deal:</strong> ${assetAvgSo.toFixed(1)}</div>
+                                ${soBreakdownHtml}
                                 ${astats.open_trades && astats.open_trades.length > 0 ? `<div style="color: #999;"><strong>Open at End:</strong> ${astats.open_trades.length}</div>` : ''}
                             </div>
                         </div>
