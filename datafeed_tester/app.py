@@ -22,6 +22,8 @@ import uuid
 import tempfile
 import hashlib
 import base64
+import itertools
+import threading
 from io import BytesIO
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional, Any
@@ -111,6 +113,8 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 
 BINANCE_CACHE_TTL_SECONDS = int(os.getenv("BINANCE_CACHE_TTL_SECONDS", "600"))
 _BINANCE_FETCH_CACHE: Dict[str, Any] = {}
+_SMARTBOT_OPTIMIZER_JOBS: Dict[str, Dict[str, Any]] = {}
+_SMARTBOT_OPTIMIZER_JOBS_LOCK = threading.Lock()
 
 try:
     import resource  # linux/unix (Render)
@@ -158,6 +162,137 @@ def fetch_binance_only_cached(**kwargs):
         oldest = min(_BINANCE_FETCH_CACHE.items(), key=lambda item: item[1]["ts"])[0]
         _BINANCE_FETCH_CACHE.pop(oldest, None)
     return result
+
+
+def _parse_grid_values(raw_values, cast_fn):
+    """Normalise une grille de paramètres vers une liste typée (CSV string ou liste JSON)."""
+    if raw_values is None:
+        return []
+
+    values = raw_values
+    if isinstance(raw_values, str):
+        values = [part.strip() for part in raw_values.split(',') if part.strip()]
+
+    if not isinstance(values, list):
+        return []
+
+    parsed = []
+    for value in values:
+        try:
+            parsed.append(cast_fn(value))
+        except Exception:
+            continue
+    return parsed
+
+
+def _load_single_asset_df(symbol: str, exchange_name: str, timeframe: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """Charge et standardise les données OHLCV d'un seul asset pour backtest/optimisation."""
+    from datetime import datetime as dt, timezone
+
+    start_dt = dt.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+    end_dt = dt.strptime(end_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+    since_ms = int(start_dt.timestamp() * 1000)
+    until_ms = int(end_dt.timestamp() * 1000)
+
+    timeframe_map = {
+        '1m': '1m',
+        '5m': '5m',
+        '15m': '15m',
+        '1h': '1h',
+        '4h': '4h',
+        '1d': '1d'
+    }
+    tf = timeframe_map.get(timeframe, '1d')
+
+    if exchange_name.lower() == 'alpaca':
+        df = fetch_ohlcv(
+            exchange='alpaca',
+            symbol=symbol,
+            timeframe=tf,
+            since_ms=since_ms,
+            until_ms=until_ms
+        )
+    else:
+        exchanges_list = ['binance', 'coinbase', 'kraken', 'kucoin', 'okx']
+        if exchange_name.lower() in exchanges_list:
+            exchanges_list = [exchange_name.lower()] + [e for e in exchanges_list if e != exchange_name.lower()]
+
+        agg, detail, fetch_data = compare_exchanges_on_bases(
+            exchanges=exchanges_list,
+            bases=[symbol],
+            timeframe=tf,
+            lookback_days=365,
+            since_ms=since_ms,
+            until_ms=until_ms,
+            selection='best'
+        )
+
+        if agg is None or agg.empty or symbol not in fetch_data.get('__FINAL__', {}):
+            raise ValueError(f"Aucune donnée disponible pour {symbol}")
+
+        df = fetch_data['__FINAL__'][symbol].copy()
+
+    if df is None or df.empty:
+        raise ValueError(f"Aucune donnée récupérée pour {symbol}")
+
+    if 'date' in df.columns:
+        df = df.set_index('date')
+    elif 'timestamp' in df.columns:
+        df.index = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+        df = df.drop('timestamp', axis=1, errors='ignore')
+
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+
+    df = df.rename(columns={
+        'open': 'Open',
+        'high': 'High',
+        'low': 'Low',
+        'close': 'Close',
+        'volume': 'Volume'
+    })
+
+    required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        raise ValueError(f"Colonnes manquantes: {missing}")
+
+    df = df[required_cols].dropna()
+
+    filter_start = pd.to_datetime(start_date).tz_localize('UTC')
+    filter_end = pd.to_datetime(end_date).tz_localize('UTC')
+    if df.index.tz is None:
+        df.index = df.index.tz_localize('UTC')
+
+    df = df[~df.index.isna()]
+    df = df[(df.index >= filter_start) & (df.index <= filter_end)]
+    if df.empty:
+        raise ValueError(f"Aucune donnée dans la période demandée {start_date} -> {end_date}")
+
+    return df
+
+
+def _parse_symbol_list(raw_symbols: Any) -> List[str]:
+    """Normalise un champ symbole vers une liste unique de symboles."""
+    if raw_symbols is None:
+        return []
+
+    if isinstance(raw_symbols, str):
+        values = [part.strip() for part in raw_symbols.split(',')]
+    elif isinstance(raw_symbols, (list, tuple, set)):
+        values = [str(part).strip() for part in raw_symbols]
+    else:
+        values = [str(raw_symbols).strip()]
+
+    normalized: List[str] = []
+    seen = set()
+    for value in values:
+        symbol = value.upper().replace(' ', '')
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        normalized.append(symbol)
+    return normalized
 
 # Import helper to run multi-asset vectorbt backtests (uses project fetcher)
 try:
@@ -3661,6 +3796,7 @@ def backtest_smartbot_v2_endpoint():
         strategy_mode = data.get('strategy_mode', 'dca')
         if strategy_mode not in ('dca', 'stop_loss'):
             strategy_mode = 'dca'
+        effective_stop_loss = float(data.get('stop_loss', 0.0)) if strategy_mode == 'stop_loss' else 0.0
 
         max_safe_order_default = 20 if strategy_mode == 'dca' else 0
 
@@ -3690,7 +3826,7 @@ def backtest_smartbot_v2_endpoint():
             # Take Profit Settings
             strategy_mode=strategy_mode,
             take_profit=float(data.get('take_profit', 1.5)),
-            stop_loss=float(data.get('stop_loss', 0.0)),
+            stop_loss=effective_stop_loss,
             tp_type=data.get('tp_type', 'From Average Entry'),
             
             # Indicator Settings: RSI
@@ -3713,7 +3849,8 @@ def backtest_smartbot_v2_endpoint():
             restrict_trading_to_us_market_hours=(exchange_name.lower() == 'alpaca'),
             trading_timeframe=tf,
             # Par défaut, on garde la position ouverte en fin de période.
-            close_last_trade=bool(data.get('close_last_trade', False))
+            close_last_trade=bool(data.get('close_last_trade', False)),
+            max_trade_duration_bars=int(data.get('max_trade_duration_bars', 0))
         )
         
         # Exécution du backtest
@@ -3915,6 +4052,8 @@ def create_plotly_price_chart(df_price, trades_df, title: str = "Price Chart"):
         tp_prices = []
         sl_dates = []
         sl_prices = []
+        time_dates = []
+        time_prices = []
         for _, trade in trades_df.iterrows():
             if 'exit_time' not in trade or 'exit_price' not in trade or pd.isna(trade['exit_time']):
                 continue
@@ -3923,6 +4062,9 @@ def create_plotly_price_chart(df_price, trades_df, title: str = "Price Chart"):
             if reason == 'SL':
                 sl_dates.append(pd.to_datetime(trade['exit_time']).strftime('%Y-%m-%d'))
                 sl_prices.append(float(trade['exit_price']))
+            elif reason == 'TIME':
+                time_dates.append(pd.to_datetime(trade['exit_time']).strftime('%Y-%m-%d'))
+                time_prices.append(float(trade['exit_price']))
             else:
                 tp_dates.append(pd.to_datetime(trade['exit_time']).strftime('%Y-%m-%d'))
                 tp_prices.append(float(trade['exit_price']))
@@ -3950,6 +4092,19 @@ def create_plotly_price_chart(df_price, trades_df, title: str = "Price Chart"):
                 'text': ['SL'] * len(sl_dates),
                 'textposition': 'bottom center',
                 'marker': {'color': '#d62728', 'size': 12, 'symbol': 'triangle-down'},
+                'showlegend': True
+            })
+
+        if time_dates:
+            traces.append({
+                'type': 'scatter',
+                'mode': 'markers+text',
+                'x': time_dates,
+                'y': time_prices,
+                'name': 'Max Duration',
+                'text': ['TIME'] * len(time_dates),
+                'textposition': 'bottom center',
+                'marker': {'color': '#8b5cf6', 'size': 12, 'symbol': 'x'},
                 'showlegend': True
             })
 
@@ -4030,6 +4185,7 @@ def backtest_smartbot_v2_multi_endpoint():
         strategy_mode = data.get('strategy_mode', 'dca')
         if strategy_mode not in ('dca', 'stop_loss'):
             strategy_mode = 'dca'
+        effective_stop_loss = float(data.get('stop_loss', 0.0)) if strategy_mode == 'stop_loss' else 0.0
 
         max_safe_order_default = 20 if strategy_mode == 'dca' else 0
 
@@ -4047,19 +4203,21 @@ def backtest_smartbot_v2_multi_endpoint():
             atr_mult_step_scale=float(data.get('atr_step_scale', 1.2)),
             strategy_mode=strategy_mode,
             take_profit=float(data.get('take_profit', 1.5)),
-            stop_loss=float(data.get('stop_loss', 0.0)),
+            stop_loss=effective_stop_loss,
             tp_type=data.get('tp_type', 'From Average Entry'),
             rsi_length=int(data.get('rsi_length', 2)),
             dsc_rsi_threshold_low=int(data.get('rsi_threshold', 3)),
             mfi_length=int(data.get('mfi_length', 14)),
             mfi_threshold_low=int(data.get('mfi_threshold', 30)),
             bb_length=int(data.get('bb_length', 20)),
+            bb_threshold_low=float(data.get('bb_threshold_low', 0.0)),
             initial_capital=float(data.get('initial_capital', 100000.0)),
             commission=float(data.get('commission', 0.001)),
             restrict_trading_to_us_market_hours=(exchange_name.lower() == 'alpaca'),
             trading_timeframe=timeframe,
             # Par défaut, on garde les positions ouvertes en fin de période.
-            close_last_trade=bool(data.get('close_last_trade', False))
+            close_last_trade=bool(data.get('close_last_trade', False)),
+            max_trade_duration_bars=int(data.get('max_trade_duration_bars', 0))
         )
         
         # Téléchargement des données pour tous les assets
@@ -4347,6 +4505,284 @@ def backtest_smartbot_v2_multi_endpoint():
     finally:
         # Libération explicite des objets lourds après chaque requête
         gc.collect()
+
+
+def _run_smartbot_optimizer(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Exécute une optimisation SmartBot V2 et retourne une réponse JSON sérialisable."""
+    t0 = time.perf_counter()
+    try:
+
+        symbols = _parse_symbol_list(data.get('symbols') or data.get('symbol') or ['BTC'])
+        if not symbols:
+            symbols = ['BTC']
+
+        quote = data.get('quote', 'USD')
+        exchange_name = str(data.get('exchange', 'binance'))
+        timeframe = data.get('timeframe', '1h')
+        start_date = data.get('start_date', '2024-01-01')
+        end_date = data.get('end_date', '2025-01-01')
+
+        strategy_mode = data.get('strategy_mode', 'dca')
+        if strategy_mode not in ('dca', 'stop_loss'):
+            strategy_mode = 'dca'
+        effective_stop_loss = float(data.get('stop_loss', 0.0)) if strategy_mode == 'stop_loss' else 0.0
+
+        max_safe_order_default = 20 if strategy_mode == 'dca' else 0
+
+        symbol_data = {
+            symbol: _load_single_asset_df(
+                symbol=symbol,
+                exchange_name=exchange_name,
+                timeframe=timeframe,
+                start_date=start_date,
+                end_date=end_date
+            )
+            for symbol in symbols
+        }
+
+        base_config = {
+            'dsc': data.get('dsc', 'RSI + MFI'),
+            'base_order': float(data.get('base_order', 1000.0)),
+            'safe_order': float(data.get('safe_order', 1500.0)),
+            'max_so': int(data.get('max_so', max_safe_order_default)),
+            'so_volume_scale': float(data.get('so_volume_scale', 1.5)),
+            'pricedevbase': data.get('pricedevbase', 'ATR'),
+            'price_deviation': float(data.get('price_deviation', 4.0)),
+            'atr_length': int(data.get('atr_length', 14)),
+            'atr_mult': float(data.get('atr_mult', 3.0)),
+            'atr_step_scale': float(data.get('atr_step_scale', 1.2)),
+            'take_profit': float(data.get('take_profit', 1.5)),
+            'stop_loss': effective_stop_loss,
+            'tp_type': data.get('tp_type', 'From Average Entry'),
+            'rsi_length': int(data.get('rsi_length', 2)),
+            'rsi_threshold': int(data.get('rsi_threshold', 3)),
+            'mfi_length': int(data.get('mfi_length', 14)),
+            'mfi_threshold': int(data.get('mfi_threshold', 30)),
+            'bb_length': int(data.get('bb_length', 20)),
+            'bb_threshold_low': float(data.get('bb_threshold_low', 0.0)),
+            'bb_mult': float(data.get('bb_mult', 2.0)),
+            'initial_capital': float(data.get('initial_capital', 100000.0)),
+            'commission': float(data.get('commission', 0.001)),
+            'close_last_trade': bool(data.get('close_last_trade', False)),
+            'max_trade_duration_bars': int(data.get('max_trade_duration_bars', 0)),
+        }
+
+        objective = str(data.get('objective', 'capital_return_pct'))
+        minimize_objective = bool(data.get('minimize_objective', False))
+        max_combinations = int(data.get('max_combinations', 120))
+        max_combinations = max(1, min(max_combinations, 1000))
+
+        raw_grid = data.get('param_grid', {}) or {}
+        grid_definitions = [
+            ('take_profit', float),
+            ('stop_loss', float),
+            ('rsi_threshold', int),
+            ('mfi_threshold', int),
+            ('atr_mult', float),
+            ('atr_length', int),
+            ('bb_length', int),
+            ('bb_threshold_low', float),
+            ('price_deviation', float),
+            ('max_so', int),
+            ('so_volume_scale', float),
+            ('max_trade_duration_bars', int),
+        ]
+
+        active_grids: Dict[str, List[Any]] = {}
+        for key, cast_fn in grid_definitions:
+            values = _parse_grid_values(raw_grid.get(key), cast_fn)
+            if values:
+                active_grids[key] = values
+
+        if not active_grids:
+            # fallback: run unique configuration as a single optimization candidate
+            active_grids = {'take_profit': [base_config['take_profit']]}
+
+        grid_keys = list(active_grids.keys())
+        grid_values = [active_grids[key] for key in grid_keys]
+        all_combinations = list(itertools.product(*grid_values))
+        total_possible = len(all_combinations)
+        selected_combinations = all_combinations[:max_combinations]
+
+        runs = []
+        for idx, combination in enumerate(selected_combinations, start=1):
+            combo_params = dict(zip(grid_keys, combination))
+            run_cfg = dict(base_config)
+            run_cfg.update(combo_params)
+
+            if strategy_mode == 'stop_loss':
+                run_cfg['max_so'] = 0
+
+            per_symbol_results = []
+            objective_scores = []
+            total_pnl = 0.0
+            total_deals = 0
+            total_time_closed_deals = 0
+            total_win_rate = 0.0
+            drawdown_values = []
+
+            for symbol, df in symbol_data.items():
+                params = ParametresDCA_SmartBotV2(
+                    dsc=run_cfg['dsc'],
+                    base_order=float(run_cfg['base_order']),
+                    safe_order=float(run_cfg['safe_order']),
+                    max_safe_order=int(run_cfg['max_so']),
+                    safe_order_volume_scale=float(run_cfg['so_volume_scale']),
+                    pricedevbase=run_cfg['pricedevbase'],
+                    price_deviation=float(run_cfg['price_deviation']),
+                    atr_length=int(run_cfg['atr_length']),
+                    atr_mult=float(run_cfg['atr_mult']),
+                    atr_mult_step_scale=float(run_cfg['atr_step_scale']),
+                    strategy_mode=strategy_mode,
+                    take_profit=float(run_cfg['take_profit']),
+                    stop_loss=float(run_cfg['stop_loss']),
+                    max_trade_duration_bars=int(run_cfg['max_trade_duration_bars']),
+                    tp_type=run_cfg['tp_type'],
+                    rsi_length=int(run_cfg['rsi_length']),
+                    dsc_rsi_threshold_low=int(run_cfg['rsi_threshold']),
+                    mfi_length=int(run_cfg['mfi_length']),
+                    mfi_threshold_low=int(run_cfg['mfi_threshold']),
+                    bb_length=int(run_cfg['bb_length']),
+                    bb_mult=float(run_cfg['bb_mult']),
+                    bb_threshold_low=float(run_cfg['bb_threshold_low']),
+                    initial_capital=float(run_cfg['initial_capital']),
+                    commission=float(run_cfg['commission']),
+                    close_last_trade=bool(run_cfg['close_last_trade']),
+                    restrict_trading_to_us_market_hours=(exchange_name.lower() == 'alpaca'),
+                    trading_timeframe=timeframe,
+                )
+
+                trades, equity, stats = backtest_smartbot_v2(df, params)
+                symbol_score = float(stats.get(objective, stats.get('capital_return_pct', 0.0)))
+                objective_scores.append(symbol_score)
+                total_pnl += float(stats.get('total_pnl', 0.0))
+                total_deals += int(stats.get('total_deals', 0))
+                total_time_closed_deals += int(stats.get('time_closed_deals', 0))
+                total_win_rate += float(stats.get('win_rate_tradingview', 0.0))
+                drawdown_values.append(float(stats.get('max_drawdown_pct', 0.0)))
+
+                per_symbol_results.append({
+                    'symbol': symbol,
+                    'score': symbol_score,
+                    'statistics': {
+                        'capital_return_pct': float(stats.get('capital_return_pct', 0.0)),
+                        'total_pnl': float(stats.get('total_pnl', 0.0)),
+                        'max_drawdown_pct': float(stats.get('max_drawdown_pct', 0.0)),
+                        'total_deals': int(stats.get('total_deals', 0)),
+                        'win_rate_tradingview': float(stats.get('win_rate_tradingview', 0.0)),
+                        'time_closed_deals': int(stats.get('time_closed_deals', 0)),
+                    }
+                })
+
+            score = float(np.mean(objective_scores)) if objective_scores else 0.0
+
+            runs.append({
+                'rank_candidate': idx,
+                'score': score,
+                'objective': objective,
+                'combo': combo_params,
+                'symbols': symbols,
+                'symbol_results': per_symbol_results,
+                'statistics': {
+                    'capital_return_pct': float(np.mean([item['statistics']['capital_return_pct'] for item in per_symbol_results])) if per_symbol_results else 0.0,
+                    'total_pnl': float(total_pnl),
+                    'max_drawdown_pct': float(min(drawdown_values)) if drawdown_values else 0.0,
+                    'total_deals': int(total_deals),
+                    'win_rate_tradingview': float(total_win_rate / len(per_symbol_results)) if per_symbol_results else 0.0,
+                    'time_closed_deals': int(total_time_closed_deals),
+                }
+            })
+
+        reverse_sort = not minimize_objective and objective not in ('max_drawdown', 'max_drawdown_pct')
+        runs.sort(key=lambda item: item['score'], reverse=reverse_sort)
+
+        for rank, run in enumerate(runs, start=1):
+            run['rank'] = rank
+
+        response = {
+            'success': True,
+            'symbol': symbols[0] if len(symbols) == 1 else ','.join(symbols),
+            'symbols': symbols,
+            'exchange': exchange_name,
+            'timeframe': timeframe,
+            'period': f"{start_date} to {end_date}",
+            'strategy_mode': strategy_mode,
+            'objective': objective,
+            'tested_combinations': len(selected_combinations),
+            'total_possible_combinations': total_possible,
+            'truncated': total_possible > len(selected_combinations),
+            'best_run': runs[0] if runs else None,
+            'runs': runs,
+            'elapsed_seconds': round(time.perf_counter() - t0, 3),
+        }
+        return convert_pandas_to_json(response)
+
+    except Exception as e:
+        print(f"❌ Erreur optimize-smartbot-v2: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+@app.route('/optimize-smartbot-v2', methods=['POST'])
+def optimize_smartbot_v2_endpoint():
+    """Lance une optimisation synchrone sur SmartBot V2."""
+    data = request.json or {}
+    try:
+        response = _run_smartbot_optimizer(data)
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/optimize-smartbot-v2/start', methods=['POST'])
+def optimize_smartbot_v2_start_endpoint():
+    """Démarre une optimisation asynchrone et retourne un job_id immédiatement."""
+    data = request.json or {}
+    job_id = str(uuid.uuid4())
+
+    with _SMARTBOT_OPTIMIZER_JOBS_LOCK:
+        _SMARTBOT_OPTIMIZER_JOBS[job_id] = {
+            'status': 'running',
+            'created_at': time.time(),
+            'updated_at': time.time(),
+            'result': None,
+            'error': None,
+        }
+
+    def worker():
+        try:
+            result = _run_smartbot_optimizer(data)
+            with _SMARTBOT_OPTIMIZER_JOBS_LOCK:
+                _SMARTBOT_OPTIMIZER_JOBS[job_id]['status'] = 'completed'
+                _SMARTBOT_OPTIMIZER_JOBS[job_id]['updated_at'] = time.time()
+                _SMARTBOT_OPTIMIZER_JOBS[job_id]['result'] = result
+        except Exception as exc:
+            with _SMARTBOT_OPTIMIZER_JOBS_LOCK:
+                _SMARTBOT_OPTIMIZER_JOBS[job_id]['status'] = 'error'
+                _SMARTBOT_OPTIMIZER_JOBS[job_id]['updated_at'] = time.time()
+                _SMARTBOT_OPTIMIZER_JOBS[job_id]['error'] = str(exc)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return jsonify({'success': True, 'job_id': job_id, 'status': 'running'})
+
+
+@app.route('/optimize-smartbot-v2/status/<job_id>', methods=['GET'])
+def optimize_smartbot_v2_status_endpoint(job_id: str):
+    """Retourne l'état d'un job d'optimisation asynchrone."""
+    with _SMARTBOT_OPTIMIZER_JOBS_LOCK:
+        job = _SMARTBOT_OPTIMIZER_JOBS.get(job_id)
+
+    if not job:
+        return jsonify({'error': 'unknown job id'}), 404
+
+    response = {
+        'success': job['status'] == 'completed',
+        'status': job['status'],
+        'result': job['result'],
+        'error': job['error'],
+    }
+    return jsonify(convert_pandas_to_json(response))
 
 
 # -----------------------------------------------------------------------------

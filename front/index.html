@@ -65,7 +65,7 @@
         /* Navigation Buttons */
         .nav-buttons {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 20px;
             margin-top: 40px;
             max-width: 1200px;
@@ -200,6 +200,10 @@
             <a href="run_multi_smartbot_stocks.html?strategy=dca" class="nav-btn strategy-link" data-base="run_multi_smartbot_stocks.html">
                 <span class="label">Stocks Multi</span>
                 <span class="description">Portfolio d'actions</span>
+            </a>
+            <a href="optimize_smartbot.html?strategy=dca" class="nav-btn strategy-link" data-base="optimize_smartbot.html">
+                <span class="label">Optimizer</span>
+                <span class="description">Test de grilles parametres</span>
             </a>
         </div>
     </div>

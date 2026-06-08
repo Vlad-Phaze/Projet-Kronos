@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kronos Capital - Optimizer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #edeae4;
+            color: #1a1a1a;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+        .container { max-width: 1280px; margin: 0 auto; padding: 24px; }
+        header { margin-bottom: 20px; }
+        h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
+        .subtitle { color: #666; margin-top: 6px; }
+        .nav-links { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px; }
+        .nav-btn {
+            text-decoration: none;
+            color: #1a1a1a;
+            background: #fff;
+            border: 1px solid #d8d4ce;
+            border-radius: 8px;
+            padding: 9px 14px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .nav-btn.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 14px;
+        }
+        .card {
+            background: #fff;
+            border: 1px solid #d8d4ce;
+            border-radius: 12px;
+            padding: 14px;
+        }
+        .card h3 { font-size: 0.95rem; margin-bottom: 10px; }
+        .form-group { margin-bottom: 10px; }
+        .form-group label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #333; }
+        .hint { color: #888; font-size: 11px; }
+        input, select {
+            width: 100%;
+            border: 1px solid #e0ddd8;
+            border-radius: 8px;
+            background: #fafafa;
+            padding: 8px 10px;
+            font-size: 13px;
+        }
+        .actions { display: flex; gap: 10px; margin: 16px 0 8px; }
+        .btn {
+            border: 1px solid #1a1a1a;
+            background: #1a1a1a;
+            color: #fff;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn.secondary { background: #fff; color: #1a1a1a; border-color: #d8d4ce; }
+
+        #parametersContainer {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .param-box {
+            background: #fff;
+            border: 1px solid #d8d4ce;
+            border-radius: 10px;
+            padding: 10px;
+        }
+        .param-box-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+
+        .results {
+            margin-top: 20px;
+            background: #fff;
+            border: 1px solid #d8d4ce;
+            border-radius: 12px;
+            padding: 14px;
+            display: none;
+        }
+        .results.show { display: block; }
+        table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+        th, td { border-bottom: 1px solid #efefef; padding: 8px; text-align: left; }
+        .positive { color: #1b8f3a; }
+        .negative { color: #c33333; }
+        .loading { display: none; margin-top: 10px; color: #666; }
+        .loading.show { display: block; }
+
+        @media (max-width: 768px) {
+            .container { padding: 14px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>KRONOS CAPITAL OPTIMIZER</h1>
+            <p class="subtitle" id="strategySubtitle">Optimisation automatique SmartBot V2 - Strategie DCA</p>
+            <div class="nav-links">
+                <a href="index.html" class="nav-btn">Home</a>
+                <a href="configure_smartbot.html?strategy=dca" id="nav-crypto-single" class="nav-btn">Crypto Single</a>
+                <a href="run_multi_smartbot.html?strategy=dca" id="nav-crypto-multi" class="nav-btn">Crypto Multi</a>
+                <a href="configure_smartbot_stocks.html?strategy=dca" id="nav-stock-single" class="nav-btn">Stock Single</a>
+                <a href="run_multi_smartbot_stocks.html?strategy=dca" id="nav-stocks-multi" class="nav-btn">Stocks Multi</a>
+                <a href="optimize_smartbot.html?strategy=dca" id="nav-optimizer" class="nav-btn active">Optimizer</a>
+            </div>
+        </header>
+
+        <form id="optimizationForm">
+            <div class="grid">
+                <div class="card">
+                    <h3>Market</h3>
+                    <div class="form-group">
+                        <label>Exchange</label>
+                        <select id="exchange">
+                            <option value="binance">Crypto (Binance)</option>
+                            <option value="alpaca">Stocks (Alpaca)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Symbol(s)</label>
+                        <input type="text" id="symbol" value="BTC" required placeholder="BTC,ETH,SOL">
+                    </div>
+                    <div class="form-group">
+                        <label>Timeframe</label>
+                        <select id="timeframe">
+                            <option value="1h" selected>1h</option>
+                            <option value="4h">4h</option>
+                            <option value="1d">1d</option>
+                            <option value="15m">15m</option>
+                            <option value="5m">5m</option>
+                            <option value="1m">1m</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Start Date</label>
+                        <input type="date" id="start_date" value="2024-01-01" required>
+                    </div>
+                    <div class="form-group">
+                        <label>End Date</label>
+                        <input type="date" id="end_date" value="2025-01-01" required>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Base Strategy Params</h3>
+                    <div class="form-group"><label>DSC</label><select id="dsc"><option value="RSI + MFI" selected>RSI + MFI</option><option value="RSI">RSI</option><option value="MFI">MFI</option><option value="Bollinger Band %">Bollinger Band %</option><option value="RSI + BB">RSI + BB</option><option value="BB + MFI">BB + MFI</option><option value="All Three">All Three</option></select></div>
+                    <div class="form-group"><label>Base Order ($)</label><input type="number" id="base_order" value="1000"></div>
+                    <div class="form-group dca-only"><label>Safety Order ($)</label><input type="number" id="safe_order" value="1500"></div>
+                    <div class="form-group dca-only"><label>Max Safety Orders</label><input type="number" id="max_so" value="20"></div>
+                    <div class="form-group dca-only"><label>SO Volume Scale</label><input type="number" id="so_volume_scale" value="1.5" step="0.1"></div>
+                    <div class="form-group"><label>Initial Capital ($)</label><input type="number" id="initial_capital" value="100000"></div>
+                </div>
+
+                <div class="card">
+                    <h3>Risk / Exit</h3>
+                    <div class="form-group"><label>Price Deviation (%)</label><input type="number" id="price_deviation" value="4.0" step="0.1"></div>
+                    <div class="form-group"><label>ATR Length</label><input type="number" id="atr_length" value="14"></div>
+                    <div class="form-group"><label>ATR Mult</label><input type="number" id="atr_mult" value="3.0" step="0.1"></div>
+                    <div class="form-group"><label>ATR Step Scale</label><input type="number" id="atr_step_scale" value="1.2" step="0.1"></div>
+                    <div class="form-group"><label>Take Profit (%)</label><input type="number" id="take_profit" value="1.5" step="0.1"></div>
+                    <div class="form-group stop-loss-only"><label>Stop Loss (%)</label><input type="number" id="stop_loss" value="2.0" step="0.1"></div>
+                    <div class="form-group"><label>Max Trade Duration (bars)</label><input type="number" id="max_trade_duration_bars" value="0" min="0"></div>
+                    <div class="form-group"><label>Commission (%)</label><input type="number" id="commission" value="0.1" step="0.01"></div>
+                    <input type="hidden" id="pricedevbase" value="ATR">
+                    <input type="hidden" id="tp_type" value="From Average Entry">
+                </div>
+
+                <div class="card">
+                    <h3>Indicators</h3>
+                    <div class="form-group"><label>RSI Length</label><input type="number" id="rsi_length" value="2"></div>
+                    <div class="form-group"><label>RSI Threshold</label><input type="number" id="rsi_threshold" value="3"></div>
+                    <div class="form-group"><label>MFI Length</label><input type="number" id="mfi_length" value="14"></div>
+                    <div class="form-group"><label>MFI Threshold</label><input type="number" id="mfi_threshold" value="30"></div>
+                    <div class="form-group"><label>BB Length</label><input type="number" id="bb_length" value="20"></div>
+                    <div class="form-group"><label>BB% Lower Threshold</label><input type="number" id="bb_threshold_low" value="0.0" step="0.01"></div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 14px;">
+                <h3>Optimization Grid</h3>
+                <div class="form-group">
+                    <label>Add Parameter To Optimize</label>
+                    <select id="parameterSelector">
+                        <option value="take_profit">Take Profit %</option>
+                        <option value="stop_loss" class="stop-loss-only-option">Stop Loss %</option>
+                        <option value="max_trade_duration_bars">Max Trade Duration (bars)</option>
+                        <option value="bb_threshold_low">BB% Lower Threshold</option>
+                        <option value="rsi_threshold">RSI Threshold</option>
+                        <option value="mfi_threshold">MFI Threshold</option>
+                        <option value="atr_mult">ATR Mult</option>
+                        <option value="atr_length">ATR Length</option>
+                        <option value="bb_length">BB Length</option>
+                        <option value="price_deviation">Price Deviation</option>
+                        <option value="base_order">Base Order</option>
+                        <option value="safe_order">Safety Order</option>
+                        <option value="max_so">Max Safety Orders</option>
+                        <option value="so_volume_scale">SO Volume Scale</option>
+                    </select>
+                </div>
+                <button type="button" class="btn secondary" onclick="addParameter()">Add Parameter</button>
+                <div id="parametersContainer"></div>
+                <p class="hint" style="margin-top: 8px;">Astuce: plus la grille est grande, plus le calcul est long.</p>
+            </div>
+
+            <div class="actions">
+                <button type="submit" class="btn" id="runBtn">Run Optimization</button>
+                <button type="button" class="btn secondary" onclick="resetForm()">Reset</button>
+                <button type="button" class="btn secondary" onclick="exportCSV()">Export CSV</button>
+                <button type="button" class="btn secondary" onclick="exportJSON()">Export JSON</button>
+            </div>
+        </form>
+
+        <div id="loading" class="loading">Running optimization...</div>
+
+        <div class="results" id="resultsSection">
+            <h3>Optimization Results</h3>
+            <div id="resultsContent"></div>
+        </div>
+    </div>
+
+    <script>
+        let parameters = [];
+        let optimizationResults = null;
+        const strategyMode = new URLSearchParams(window.location.search).get('strategy') === 'stop_loss' ? 'stop_loss' : 'dca';
+
+        function strategyHref(page) {
+            return `${page}?strategy=${strategyMode}`;
+        }
+
+        function applyStrategyModeUi() {
+            const subtitle = document.getElementById('strategySubtitle');
+            if (subtitle) {
+                subtitle.textContent = strategyMode === 'stop_loss'
+                    ? 'Optimisation automatique SmartBot V2 - Strategie Stop loss'
+                    : 'Optimisation automatique SmartBot V2 - Strategie DCA';
+            }
+
+            const links = {
+                'nav-crypto-single': 'configure_smartbot.html',
+                'nav-crypto-multi': 'run_multi_smartbot.html',
+                'nav-stock-single': 'configure_smartbot_stocks.html',
+                'nav-stocks-multi': 'run_multi_smartbot_stocks.html',
+                'nav-optimizer': 'optimize_smartbot.html'
+            };
+            Object.entries(links).forEach(([id, page]) => {
+                const el = document.getElementById(id);
+                if (el) el.href = strategyHref(page);
+            });
+
+            document.querySelectorAll('.dca-only').forEach((el) => {
+                el.style.display = strategyMode === 'dca' ? '' : 'none';
+            });
+
+            document.querySelectorAll('.stop-loss-only').forEach((el) => {
+                el.style.display = strategyMode === 'stop_loss' ? '' : 'none';
+            });
+
+            document.querySelectorAll('.stop-loss-only-option').forEach((option) => {
+                option.hidden = strategyMode !== 'stop_loss';
+                option.disabled = strategyMode !== 'stop_loss';
+            });
+
+            ['safe_order', 'max_so', 'so_volume_scale'].forEach((value) => {
+                const option = document.querySelector(`#parameterSelector option[value="${value}"]`);
+                if (option) {
+                    option.hidden = strategyMode !== 'dca';
+                    option.disabled = strategyMode !== 'dca';
+                }
+            });
+        }
+
+        function addParameter() {
+            const selector = document.getElementById('parameterSelector');
+            const name = selector.value;
+            const label = selector.options[selector.selectedIndex].text;
+
+            if (parameters.find((p) => p.name === name)) {
+                alert('Parameter already added.');
+                return;
+            }
+
+            const defaults = {
+                take_profit: { min: 0.5, max: 3.0, step: 0.5, type: 'float' },
+                stop_loss: { min: 0.5, max: 5.0, step: 0.5, type: 'float' },
+                max_trade_duration_bars: { min: 0, max: 60, step: 5, type: 'int' },
+                bb_threshold_low: { min: -1.0, max: 0.5, step: 0.05, type: 'float' },
+                rsi_threshold: { min: 1, max: 10, step: 1, type: 'int' },
+                mfi_threshold: { min: 10, max: 50, step: 5, type: 'int' },
+                atr_mult: { min: 1.0, max: 5.0, step: 0.5, type: 'float' },
+                atr_length: { min: 7, max: 21, step: 1, type: 'int' },
+                bb_length: { min: 10, max: 30, step: 2, type: 'int' },
+                price_deviation: { min: 1.0, max: 10.0, step: 1, type: 'float' },
+                base_order: { min: 500, max: 2000, step: 250, type: 'float' },
+                safe_order: { min: 500, max: 3000, step: 250, type: 'float' },
+                max_so: { min: 5, max: 20, step: 5, type: 'int' },
+                so_volume_scale: { min: 1.0, max: 2.0, step: 0.1, type: 'float' }
+            };
+
+            const d = defaults[name] || { min: 1, max: 10, step: 1, type: 'int' };
+            parameters.push({ name, label, min: d.min, max: d.max, step: d.step, type: d.type });
+            renderParameters();
+        }
+
+        function removeParameter(idx) {
+            parameters.splice(idx, 1);
+            renderParameters();
+        }
+
+        function renderParameters() {
+            const container = document.getElementById('parametersContainer');
+            if (!parameters.length) {
+                container.innerHTML = '';
+                return;
+            }
+
+            container.innerHTML = parameters.map((p, i) => `
+                <div class="param-box">
+                    <div class="param-box-title">${p.label}</div>
+                    <div class="form-group"><label>Min</label><input type="number" value="${p.min}" step="${p.step}" onchange="parameters[${i}].min=parseFloat(this.value)"></div>
+                    <div class="form-group"><label>Max</label><input type="number" value="${p.max}" step="${p.step}" onchange="parameters[${i}].max=parseFloat(this.value)"></div>
+                    <div class="form-group"><label>Step</label><input type="number" value="${p.step}" step="${p.step}" onchange="parameters[${i}].step=parseFloat(this.value)"></div>
+                    <button type="button" class="btn secondary" style="width:100%;" onclick="removeParameter(${i})">Remove</button>
+                </div>
+            `).join('');
+        }
+
+        function buildRange(min, max, step, type) {
+            const vals = [];
+            if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step) || step <= 0) return vals;
+            let cur = min;
+            let guard = 0;
+            while (cur <= max + 1e-9 && guard < 2000) {
+                vals.push(type === 'int' ? Math.round(cur) : Number(cur.toFixed(6)));
+                cur += step;
+                guard += 1;
+            }
+            return [...new Set(vals)];
+        }
+
+        function getApiBases() {
+            const localBases = ['http://127.0.0.1:5002', 'http://localhost:5002'];
+            const remoteBases = ['https://kronos-back-pdr0.onrender.com'];
+            const hostname = (window.location.hostname || '').toLowerCase();
+            const isLocalPage = window.location.protocol === 'file:' || ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
+
+            return isLocalPage ? [...localBases, ...remoteBases] : [...remoteBases, ...localBases];
+        }
+
+        async function postJsonWithFallback(path, payload) {
+            const bases = getApiBases();
+            let lastError = null;
+
+            for (const base of bases) {
+                try {
+                    const response = await fetch(`${base}${path}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        throw new Error(data.error || `HTTP ${response.status}`);
+                    }
+
+                    return { response, data, base };
+                } catch (error) {
+                    lastError = error;
+                }
+            }
+
+            throw lastError || new Error('Failed to reach API');
+        }
+
+        async function getJsonWithFallback(path) {
+            const bases = getApiBases();
+            let lastError = null;
+
+            for (const base of bases) {
+                try {
+                    const response = await fetch(`${base}${path}`, { method: 'GET' });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        throw new Error(data.error || `HTTP ${response.status}`);
+                    }
+                    return { response, data, base };
+                } catch (error) {
+                    lastError = error;
+                }
+            }
+
+            throw lastError || new Error('Failed to reach API');
+        }
+
+        function resetForm() {
+            if (!confirm('Reset all parameters?')) return;
+            document.getElementById('optimizationForm').reset();
+            parameters = [];
+            renderParameters();
+            document.getElementById('resultsSection').classList.remove('show');
+            applyStrategyModeUi();
+        }
+
+        document.getElementById('optimizationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            if (parameters.length === 0) {
+                alert('Add at least one parameter to optimize.');
+                return;
+            }
+
+            const symbols = document.getElementById('symbol').value
+                .split(',')
+                .map((value) => value.trim().toUpperCase())
+                .filter(Boolean);
+
+            if (!symbols.length) {
+                alert('Enter at least one symbol.');
+                return;
+            }
+
+            const exchange = document.getElementById('exchange').value;
+            const quote = exchange === 'alpaca' ? 'USD' : 'USDT';
+
+            const paramGrid = {};
+            parameters.forEach((p) => {
+                paramGrid[p.name] = buildRange(p.min, p.max, p.step, p.type);
+            });
+
+            const payload = {
+                symbol: symbols[0],
+                symbols,
+                quote,
+                exchange,
+                timeframe: document.getElementById('timeframe').value,
+                start_date: document.getElementById('start_date').value,
+                end_date: document.getElementById('end_date').value,
+                strategy_mode: strategyMode,
+                dsc: document.getElementById('dsc').value,
+                base_order: parseFloat(document.getElementById('base_order').value),
+                safe_order: parseFloat(document.getElementById('safe_order').value),
+                max_so: parseInt(document.getElementById('max_so').value),
+                so_volume_scale: parseFloat(document.getElementById('so_volume_scale').value),
+                pricedevbase: document.getElementById('pricedevbase').value,
+                price_deviation: parseFloat(document.getElementById('price_deviation').value),
+                atr_length: parseInt(document.getElementById('atr_length').value),
+                atr_mult: parseFloat(document.getElementById('atr_mult').value),
+                atr_step_scale: parseFloat(document.getElementById('atr_step_scale').value),
+                take_profit: parseFloat(document.getElementById('take_profit').value),
+                stop_loss: strategyMode === 'stop_loss' ? parseFloat(document.getElementById('stop_loss').value) : 0.0,
+                max_trade_duration_bars: parseInt(document.getElementById('max_trade_duration_bars').value),
+                tp_type: document.getElementById('tp_type').value,
+                rsi_length: parseInt(document.getElementById('rsi_length').value),
+                rsi_threshold: parseInt(document.getElementById('rsi_threshold').value),
+                mfi_length: parseInt(document.getElementById('mfi_length').value),
+                mfi_threshold: parseInt(document.getElementById('mfi_threshold').value),
+                bb_length: parseInt(document.getElementById('bb_length').value),
+                bb_mult: 2.0,
+                bb_threshold_low: parseFloat(document.getElementById('bb_threshold_low').value),
+                initial_capital: parseFloat(document.getElementById('initial_capital').value),
+                commission: parseFloat(document.getElementById('commission').value) / 100,
+                objective: 'capital_return_pct',
+                max_combinations: 120,
+                param_grid: paramGrid
+            };
+
+            const loading = document.getElementById('loading');
+            const runBtn = document.getElementById('runBtn');
+            loading.classList.add('show');
+            loading.textContent = 'Starting optimization job...';
+            runBtn.disabled = true;
+
+            try {
+                let data;
+                try {
+                    const startResult = await postJsonWithFallback('/optimize-smartbot-v2/start', payload);
+                    const jobId = startResult.data.job_id;
+                    loading.textContent = `Optimization running... job ${jobId.slice(0, 8)}`;
+
+                    while (true) {
+                        await new Promise((resolve) => setTimeout(resolve, 2000));
+                        const statusResult = await getJsonWithFallback(`/optimize-smartbot-v2/status/${jobId}`);
+                        const statusData = statusResult.data;
+
+                        if (statusData.status === 'completed') {
+                            data = statusData.result;
+                            break;
+                        }
+
+                        if (statusData.status === 'error') {
+                            throw new Error(statusData.error || 'Optimization failed');
+                        }
+
+                        loading.textContent = `Optimization running... ${jobId.slice(0, 8)}`;
+                    }
+                } catch (asyncError) {
+                    const syncResult = await postJsonWithFallback('/optimize-smartbot-v2', payload);
+                    data = syncResult.data;
+                    if (!data.success) {
+                        throw new Error(data.error || 'Optimization failed');
+                    }
+                }
+
+                optimizationResults = data;
+                displayResults(data);
+            } catch (err) {
+                alert(`Optimization error: ${err.message}`);
+            } finally {
+                loading.textContent = 'Running optimization...';
+                loading.classList.remove('show');
+                runBtn.disabled = false;
+            }
+        });
+
+        function displayResults(data) {
+            const section = document.getElementById('resultsSection');
+            const content = document.getElementById('resultsContent');
+            const runs = (data.runs || []).slice(0, 20);
+            const selected = parameters.map((p) => p.name);
+
+            let html = `
+                <p><strong>${data.tested_combinations}</strong> configurations tested | Objective: <strong>${data.objective}</strong> | Strategy: <strong>${data.strategy_mode}</strong></p>
+                <p>Symbols: <strong>${(data.symbols || []).join(', ') || data.symbol || '-'}</strong></p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            ${selected.map((s) => `<th>${s}</th>`).join('')}
+                            <th>Return %</th>
+                            <th>PnL</th>
+                            <th>Drawdown %</th>
+                            <th>Win Rate %</th>
+                            <th>Deals</th>
+                            <th>TIME Closes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            runs.forEach((run) => {
+                const s = run.statistics || {};
+                html += `
+                    <tr>
+                        <td><strong>#${run.rank}</strong></td>
+                        ${selected.map((name) => `<td>${run.combo[name] ?? '-'}</td>`).join('')}
+                        <td class="${(s.capital_return_pct || 0) >= 0 ? 'positive' : 'negative'}">${(s.capital_return_pct || 0).toFixed(2)}%</td>
+                        <td class="${(s.total_pnl || 0) >= 0 ? 'positive' : 'negative'}">$${(s.total_pnl || 0).toFixed(2)}</td>
+                        <td class="negative">${(s.max_drawdown_pct || 0).toFixed(2)}%</td>
+                        <td>${(s.win_rate_tradingview || 0).toFixed(1)}%</td>
+                        <td>${s.total_deals || 0}</td>
+                        <td>${s.time_closed_deals || 0}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            content.innerHTML = html;
+            section.classList.add('show');
+            section.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function exportCSV() {
+            if (!optimizationResults || !Array.isArray(optimizationResults.runs)) return;
+            const headers = ['rank', ...parameters.map((p) => p.name), 'capital_return_pct', 'total_pnl', 'max_drawdown_pct', 'win_rate_tradingview', 'total_deals', 'time_closed_deals'];
+            let csv = headers.join(',') + '\n';
+            optimizationResults.runs.forEach((run) => {
+                const s = run.statistics || {};
+                const row = [
+                    run.rank,
+                    ...parameters.map((p) => run.combo[p.name] ?? ''),
+                    s.capital_return_pct ?? 0,
+                    s.total_pnl ?? 0,
+                    s.max_drawdown_pct ?? 0,
+                    s.win_rate_tradingview ?? 0,
+                    s.total_deals ?? 0,
+                    s.time_closed_deals ?? 0
+                ];
+                csv += row.join(',') + '\n';
+            });
+            downloadFile(csv, 'optimization_results.csv', 'text/csv');
+        }
+
+        function exportJSON() {
+            if (!optimizationResults) return;
+            downloadFile(JSON.stringify(optimizationResults, null, 2), 'optimization_results.json', 'application/json');
+        }
+
+        function downloadFile(content, filename, type) {
+            const blob = new Blob([content], { type });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        applyStrategyModeUi();
+    </script>
+</body>
+</html>

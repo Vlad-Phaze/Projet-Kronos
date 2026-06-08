@@ -45,6 +45,7 @@ class ParametresDCA_SmartBotV2:
     strategy_mode: str = "dca"  # Options: "dca", "stop_loss"
     take_profit: float = 1.5  # Take Profit (%)
     stop_loss: float = 0.0  # Stop Loss (%) - 0 désactive le SL
+    max_trade_duration_bars: int = 0  # 0 = illimité, sinon clôture forcée après N barres
     tp_type: str = "From Average Entry"  # Options: "From Average Entry", "From Base Order"
     
     # ═══════════════════════════════════════════════════════════
@@ -381,7 +382,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     
     print(f"🚀 Début du backtest - {len(close)} barres")
     print(f"📋 Configuration: DSC='{parametres.dsc}', Price Deviation='{parametres.pricedevbase}'")
-    print(f"🧠 Mode stratégie: {parametres.strategy_mode} | TP={parametres.take_profit}% | SL={parametres.stop_loss}%")
+    effective_stop_loss = parametres.stop_loss if parametres.strategy_mode == "stop_loss" else 0.0
+    print(f"🧠 Mode stratégie: {parametres.strategy_mode} | TP={parametres.take_profit}% | SL={effective_stop_loss}%")
     print(f"💰 Capital Initial=${parametres.initial_capital:.2f}")
     print(f"💰 Base Order=${parametres.base_order}, SO=${parametres.safe_order}, Max SO={parametres.max_safe_order}")
     print("="*80)
@@ -441,21 +443,29 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 tp_price = base_order_price * (1 + parametres.take_profit / 100.0)
 
             sl_price = None
-            if parametres.stop_loss > 0:
-                sl_price = avg_entry_price * (1 - parametres.stop_loss / 100.0)
+            if effective_stop_loss > 0:
+                sl_price = avg_entry_price * (1 - effective_stop_loss / 100.0)
             
             # Priorité SL si TP+SL touchés sur la même bougie (hypothèse conservatrice).
             tp_hit = high[t] >= tp_price
             sl_hit = sl_price is not None and low[t] <= sl_price
 
-            if tp_hit or sl_hit:
+            time_exit_hit = (
+                parametres.max_trade_duration_bars > 0
+                and (t - entry_bar) >= parametres.max_trade_duration_bars
+            )
+
+            if tp_hit or sl_hit or time_exit_hit:
                 # CLOSE DEAL
                 if sl_hit:
                     exit_price = sl_price
                     exit_reason = "SL"
-                else:
+                elif tp_hit:
                     exit_price = tp_price
                     exit_reason = "TP"
+                else:
+                    exit_price = price
+                    exit_reason = "TIME"
                 
                 # Calculate PnL
                 gross_proceeds = exit_price * total_position_size
@@ -463,7 +473,12 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 pnl_net = gross_proceeds - total_invested - total_fees
                 profit_pct = ((exit_price / avg_entry_price) - 1) * 100.0
 
-                signal_label = f"SL @ {parametres.stop_loss}%" if exit_reason == "SL" else f"TP @ {parametres.take_profit}%"
+                if exit_reason == "SL":
+                    signal_label = f"SL @ {effective_stop_loss}%"
+                elif exit_reason == "TP":
+                    signal_label = f"TP @ {parametres.take_profit}%"
+                else:
+                    signal_label = f"TIME @ {parametres.max_trade_duration_bars} bars"
                 
                 # Calculer le P&L de chaque position individuelle (comme TradingView)
                 individual_positions = []
@@ -537,7 +552,12 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     capital_history_array[capital_event_idx] = capital_disponible
                     capital_event_idx += 1
                 
-                exit_label = "TAKE PROFIT" if exit_reason == "TP" else "STOP LOSS"
+                if exit_reason == "TP":
+                    exit_label = "TAKE PROFIT"
+                elif exit_reason == "SL":
+                    exit_label = "STOP LOSS"
+                else:
+                    exit_label = "MAX DURATION"
                 print(f"✅ [{indice[t].strftime('%Y-%m-%d')}] {exit_label} @ ${exit_price:.2f} | "
                       f"SOs={current_so_count} | PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital=${capital_disponible:.2f}")
                 
@@ -821,6 +841,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     if not df_trades.empty:
         winning_trades = df_trades[df_trades["pnl"] > 0]
         losing_trades = df_trades[df_trades["pnl"] <= 0]
+        time_closed_deals = int((df_trades["reason"] == "TIME").sum()) if "reason" in df_trades.columns else 0
         
         # Compter le nombre total d'ordres (BO + tous les SO)
         total_orders = len(df_trades)  # Nombre de deals
@@ -886,6 +907,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             "final_capital": float(capital_disponible),
             "capital_return_pct": return_from_total_pnl_pct,
             "open_trades_at_end": open_trades_at_end,
+            "time_closed_deals": time_closed_deals,
             "open_trade": open_trade_details,
             # NOUVELLES MÉTRIQUES
             "trades_per_day": trades_per_day,
@@ -923,6 +945,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             "final_capital": float(capital_disponible),
             "capital_return_pct": return_from_total_pnl_pct,
             "open_trades_at_end": open_trades_at_end,
+            "time_closed_deals": 0,
             "open_trade": open_trade_details,
             # NOUVELLES MÉTRIQUES
             "trades_per_day": 0.0,
@@ -1668,7 +1691,8 @@ def backtest_smartbot_v2_multi_portfolio(
             current_high = df['High'].iloc[idx] if 'High' in df.columns else current_price
             current_low = df['Low'].iloc[idx] if 'Low' in df.columns else current_price
             tp_target = avg_entry * (1 + parametres.take_profit / 100)
-            sl_target = avg_entry * (1 - parametres.stop_loss / 100) if parametres.stop_loss > 0 else None
+            effective_stop_loss = parametres.stop_loss if parametres.strategy_mode == "stop_loss" else 0.0
+            sl_target = avg_entry * (1 - effective_stop_loss / 100) if effective_stop_loss > 0 else None
             tp_hit = current_high >= tp_target
             sl_hit = sl_target is not None and current_low <= sl_target
 

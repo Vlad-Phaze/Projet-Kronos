@@ -428,6 +428,7 @@
                 <a href="run_multi_smartbot.html?strategy=dca" id="nav-crypto-multi" class="nav-btn active">Crypto Multi</a>
                 <a href="configure_smartbot_stocks.html?strategy=dca" id="nav-stock-single" class="nav-btn">Stock Single</a>
                 <a href="run_multi_smartbot_stocks.html?strategy=dca" id="nav-stocks-multi" class="nav-btn">Stocks Multi</a>
+                <a href="optimize_smartbot.html?strategy=dca" id="nav-optimizer" class="nav-btn">Optimizer</a>
             </div>
         </header>
 
@@ -516,6 +517,10 @@
                                     <div class="form-group">
                                         <label>BB Length</label>
                                         <input type="number" id="bb_length" value="20" min="1" max="100">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>BB% Lower Threshold</label>
+                                        <input type="number" id="bb_threshold_low" value="0.0" max="1" step="0.01">
                                     </div>
                                 </div>
                             </div>
@@ -611,7 +616,7 @@
                                         <label>Take Profit (%)</label>
                                         <input type="number" id="take_profit" value="1.5" min="0.1" step="0.1">
                                     </div>
-                                    <div class="form-group">
+                                    <div class="form-group stop-loss-only">
                                         <label>Stop Loss (%)</label>
                                         <input type="number" id="stop_loss" value="2.0" min="0.1" step="0.1">
                                     </div>
@@ -634,6 +639,12 @@
                                             <option value="false" selected>No (Keep Open)</option>
                                             <option value="true">Yes (Force Close)</option>
                                         </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Max Trade Duration (bars)
+                                            <span class="label-help">0 = illimite</span>
+                                        </label>
+                                        <input type="number" id="max_trade_duration_bars" value="0" min="0" step="1">
                                     </div>
                                 </div>
                             </div>
@@ -691,14 +702,20 @@
             const navCryptoMulti = document.getElementById('nav-crypto-multi');
             const navStockSingle = document.getElementById('nav-stock-single');
             const navStocksMulti = document.getElementById('nav-stocks-multi');
+            const navOptimizer = document.getElementById('nav-optimizer');
 
             if (navCryptoSingle) navCryptoSingle.href = strategyHref('configure_smartbot.html');
             if (navCryptoMulti) navCryptoMulti.href = strategyHref('run_multi_smartbot.html');
             if (navStockSingle) navStockSingle.href = strategyHref('configure_smartbot_stocks.html');
             if (navStocksMulti) navStocksMulti.href = strategyHref('run_multi_smartbot_stocks.html');
+            if (navOptimizer) navOptimizer.href = strategyHref('optimize_smartbot.html');
 
             document.querySelectorAll('.dca-only').forEach((element) => {
                 element.style.display = strategyMode === 'dca' ? '' : 'none';
+            });
+
+            document.querySelectorAll('.stop-loss-only').forEach((element) => {
+                element.style.display = strategyMode === 'stop_loss' ? '' : 'none';
             });
         }
 
@@ -747,6 +764,7 @@
                 mfi_length: parseInt(document.getElementById('mfi_length').value),
                 mfi_threshold: parseInt(document.getElementById('mfi_threshold').value),
                 bb_length: parseInt(document.getElementById('bb_length').value),
+                bb_threshold_low: parseFloat(document.getElementById('bb_threshold_low').value),
                 
                 // Orders
                 base_order: parseFloat(document.getElementById('base_order').value),
@@ -764,14 +782,17 @@
                 // TP
                 strategy_mode: strategyMode,
                 take_profit: parseFloat(document.getElementById('take_profit').value),
-                stop_loss: parseFloat(document.getElementById('stop_loss').value),
+                stop_loss: strategyMode === 'stop_loss' ? parseFloat(document.getElementById('stop_loss').value) : 0.0,
+                max_trade_duration_bars: parseInt(document.getElementById('max_trade_duration_bars').value),
                 tp_type: document.getElementById('tp_type').value,
                 commission: parseFloat(document.getElementById('commission').value) / 100,
                 close_last_trade: document.getElementById('close_last_trade').value === 'true'
             };
 
             try {
-                const apiBase = window.location.hostname === 'localhost'
+                const hostname = (window.location.hostname || '').toLowerCase();
+                const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
+                const apiBase = isLocal
                     ? 'http://localhost:5002'
                     : 'https://kronos-back-pdr0.onrender.com';
                 const response = await fetch(`${apiBase}/backtest-smartbot-v2-multi`, {

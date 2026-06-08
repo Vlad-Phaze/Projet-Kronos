@@ -56,7 +56,9 @@
       };
       document.getElementById('out').textContent = 'Running... this may take a while';
       try{
-        const apiBase = window.location.hostname === 'localhost'
+        const hostname = (window.location.hostname || '').toLowerCase();
+        const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
+        const apiBase = isLocal
           ? 'http://localhost:5002'
           : 'https://kronos-back-pdr0.onrender.com';
         const res = await fetch(`${apiBase}/run-multi-backtest`, {
