@@ -313,14 +313,17 @@ def calcular_so_size(parametres: ParametresDCA_SmartBotV2, so_number: int) -> fl
     return parametres.safe_order * (parametres.safe_order_volume_scale ** so_number)
 
 
-def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV2) -> Tuple[pd.DataFrame, pd.Series, Dict]:
+def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV2, verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series, Dict]:
     """
     Backtester SmartBot V2 - Reproduction EXACTE de la logique Pine Script
     avec SO Multiplicator Method
+
+    verbose=False désactive les logs console (gain de temps important sur les gros backtests / optimisations).
     """
-    print("="*80)
-    print("🚨 BACKTESTER_EXACT.PY VERSION AVEC NOUVELLES MÉTRIQUES CHARGÉE!")
-    print("="*80)
+    if verbose:
+        print("="*80)
+        print("🚨 BACKTESTER_EXACT.PY VERSION AVEC NOUVELLES MÉTRIQUES CHARGÉE!")
+        print("="*80)
     
     for c in ("Open", "High", "Low", "Close"):
         assert c in prix.columns, f"❌ Colonne manquante: {c}"
@@ -328,11 +331,13 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     # ═══════════════════════════════════════════════════════════
     # CALCUL DES INDICATEURS
     # ═══════════════════════════════════════════════════════════
-    print("📊 Calcul des indicateurs...")
+    if verbose:
+        print("📊 Calcul des indicateurs...")
     indicators = calculer_indicateurs_smartbot(prix, parametres)
     
     # OPTIMISATION: Pré-calcul vectorisé de tous les signaux d'entrée
-    print("🎯 Pré-calcul vectorisé des signaux d'entrée...")
+    if verbose:
+        print("🎯 Pré-calcul vectorisé des signaux d'entrée...")
     entry_signals = evaluer_entry_signal_vectorized(indicators, parametres)
     
     close = prix["Close"].to_numpy(dtype=float)
@@ -380,13 +385,14 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     capital_used_at_bar = np.zeros(n, dtype=float)  # Capital utilisé (bloqué) à chaque barre
     max_capital_used = 0.0  # Capital maximum utilisé pendant tout le backtest
     
-    print(f"🚀 Début du backtest - {len(close)} barres")
-    print(f"📋 Configuration: DSC='{parametres.dsc}', Price Deviation='{parametres.pricedevbase}'")
     effective_stop_loss = parametres.stop_loss if parametres.strategy_mode == "stop_loss" else 0.0
-    print(f"🧠 Mode stratégie: {parametres.strategy_mode} | TP={parametres.take_profit}% | SL={effective_stop_loss}%")
-    print(f"💰 Capital Initial=${parametres.initial_capital:.2f}")
-    print(f"💰 Base Order=${parametres.base_order}, SO=${parametres.safe_order}, Max SO={parametres.max_safe_order}")
-    print("="*80)
+    if verbose:
+        print(f"🚀 Début du backtest - {len(close)} barres")
+        print(f"📋 Configuration: DSC='{parametres.dsc}', Price Deviation='{parametres.pricedevbase}'")
+        print(f"🧠 Mode stratégie: {parametres.strategy_mode} | TP={parametres.take_profit}% | SL={effective_stop_loss}%")
+        print(f"💰 Capital Initial=${parametres.initial_capital:.2f}")
+        print(f"💰 Base Order=${parametres.base_order}, SO=${parametres.safe_order}, Max SO={parametres.max_safe_order}")
+        print("="*80)
     
     for t in range(1, n):  # Commence à 1 pour avoir close[t-1]
         price = close[t]
@@ -402,7 +408,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             # Vérifier capital disponible
             if capital_disponible < parametres.base_order:
                 skipped_trades += 1
-                print(f"⚠️ [{indice[t].strftime('%Y-%m-%d')}] TRADE SKIPPED - Capital insuffisant (${capital_disponible:.2f} < ${parametres.base_order})")
+                if verbose:
+                    print(f"⚠️ [{indice[t].strftime('%Y-%m-%d')}] TRADE SKIPPED - Capital insuffisant (${capital_disponible:.2f} < ${parametres.base_order})")
             else:
                 # OPEN NEW DEAL
                 in_trade = True
@@ -430,7 +437,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 if capital_used > max_capital_used:
                     max_capital_used = capital_used
                 
-                print(f"📍 [{indice[t].strftime('%Y-%m-%d')}] BASE ORDER @ ${price:.2f} | Qty={qty:.6f} | Capital restant=${capital_disponible:.2f}")
+                if verbose:
+                    print(f"📍 [{indice[t].strftime('%Y-%m-%d')}] BASE ORDER @ ${price:.2f} | Qty={qty:.6f} | Capital restant=${capital_disponible:.2f}")
         
         # ═══════════════════════════════════════════════════════════
         # LOGIQUE DE SORTIE (TAKE PROFIT / STOP LOSS)
@@ -552,14 +560,15 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     capital_history_array[capital_event_idx] = capital_disponible
                     capital_event_idx += 1
                 
-                if exit_reason == "TP":
-                    exit_label = "TAKE PROFIT"
-                elif exit_reason == "SL":
-                    exit_label = "STOP LOSS"
-                else:
-                    exit_label = "MAX DURATION"
-                print(f"✅ [{indice[t].strftime('%Y-%m-%d')}] {exit_label} @ ${exit_price:.2f} | "
-                      f"SOs={current_so_count} | PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital=${capital_disponible:.2f}")
+                if verbose:
+                    if exit_reason == "TP":
+                        exit_label = "TAKE PROFIT"
+                    elif exit_reason == "SL":
+                        exit_label = "STOP LOSS"
+                    else:
+                        exit_label = "MAX DURATION"
+                    print(f"✅ [{indice[t].strftime('%Y-%m-%d')}] {exit_label} @ ${exit_price:.2f} | "
+                          f"SOs={current_so_count} | PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital=${capital_disponible:.2f}")
                 
                 # Reset state
                 in_trade = False
@@ -603,7 +612,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 
                 # Vérifier capital disponible
                 if capital_disponible < so_size:
-                    print(f"⚠️ [{indice[t].strftime('%Y-%m-%d')}] SO SKIPPED - Capital insuffisant (${capital_disponible:.2f} < ${so_size:.2f})")
+                    if verbose:
+                        print(f"⚠️ [{indice[t].strftime('%Y-%m-%d')}] SO SKIPPED - Capital insuffisant (${capital_disponible:.2f} < ${so_size:.2f})")
                     # Continue le trade sans ajouter le SO
                 else:
                     so_qty = so_size / price
@@ -635,8 +645,9 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     if capital_used > max_capital_used:
                         max_capital_used = capital_used
                     
-                    print(f"🔻 [{indice[t].strftime('%Y-%m-%d')}] SAFETY ORDER #{current_so_count} @ ${price:.2f} | "
-                          f"Size=${so_size:.2f} | Avg=${avg_entry_price:.2f} | Capital=${capital_disponible:.2f}")
+                    if verbose:
+                        print(f"🔻 [{indice[t].strftime('%Y-%m-%d')}] SAFETY ORDER #{current_so_count} @ ${price:.2f} | "
+                              f"Size=${so_size:.2f} | Avg=${avg_entry_price:.2f} | Capital=${capital_disponible:.2f}")
         
         # ═══════════════════════════════════════════════════════════
         # MISE À JOUR DE L'EQUITY ET TRACKING À CETTE BARRE
@@ -734,8 +745,9 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             capital_disponible += total_invested + pnl_net
             equity_at_bar[-1] = capital_disponible  # Mise à jour de l'equity finale
             
-            print(f"⚠️ [{indice[-1].strftime('%Y-%m-%d')}] POSITION FORCÉE @ ${prix_final:.2f} | "
-                  f"PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital final=${capital_disponible:.2f}")
+            if verbose:
+                print(f"⚠️ [{indice[-1].strftime('%Y-%m-%d')}] POSITION FORCÉE @ ${prix_final:.2f} | "
+                      f"PnL=${pnl_net:.2f} ({profit_pct:.2f}%) | Capital final=${capital_disponible:.2f}")
         else:
             # Garder le trade ouvert
             open_trades_at_end = 1
@@ -802,10 +814,11 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 "individual_positions": open_individual_positions,
             }
 
-            print(f"📌 [{indice[-1].strftime('%Y-%m-%d')}] TRADE OUVERT À LA FIN | "
-                  f"Entry=${base_order_price:.2f} | Current=${close[-1]:.2f} | "
-                  f"Avg=${avg_entry_price:.2f} | SOs={current_so_count} | "
-                  f"Invested=${total_invested:.2f}")
+            if verbose:
+                print(f"📌 [{indice[-1].strftime('%Y-%m-%d')}] TRADE OUVERT À LA FIN | "
+                      f"Entry=${base_order_price:.2f} | Current=${close[-1]:.2f} | "
+                      f"Avg=${avg_entry_price:.2f} | SOs={current_so_count} | "
+                      f"Invested=${total_invested:.2f}")
     
     # ═══════════════════════════════════════════════════════════
     # CALCUL DES STATISTIQUES
@@ -955,37 +968,38 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             "total_days": total_days
         }
     
-    print("="*80)
-    print("📈 RÉSULTATS DU BACKTEST")
-    print("="*80)
-    if statistiques and "total_trades" in statistiques:
-        print(f"Capital initial:    ${statistiques['initial_capital']:.2f}")
-        print(f"Capital final:      ${statistiques['final_capital']:.2f}")
-        print(f"Return:             {statistiques['capital_return_pct']:.2f}%")
-        print(f"-"*80)
-        print(f"Deals totaux:       {statistiques['total_trades']}")
-        print(f"Ordres totaux:      {statistiques['total_orders_placed']} (BO + SO)")
-        print(f"Positions totales:  {statistiques['total_individual_positions']} (comptage TradingView)")
-        print(f"Positions WIN:      {statistiques['winning_individual_positions']}")
-        print(f"Win Rate (TV):      {statistiques['win_rate_tradingview']:.2f}% (comme TradingView)")
-        print(f"Win Rate (Deals):   {statistiques['win_rate_deals']:.2f}% (deals complets)")
-        if statistiques.get('open_trades_at_end', 0) > 0:
-            print(f"⚠️ Trades ouverts:  {statistiques['open_trades_at_end']}")
-        print(f"-"*80)
-        print(f"PnL total:          ${statistiques['total_pnl']:.2f}")
-        print(f"PnL moyen/deal:     ${statistiques['avg_pnl_per_trade']:.2f}")
-        print(f"SO moyen/deal:      {float(statistiques.get('avg_so_per_trade', 0.0)):.1f}")
-        print(f"SO totaux placés:   {int(statistiques.get('total_so_placed', 0))}")
-        print(f"Max SO utilisé:     {int(statistiques.get('max_so_used', 0))}")
-        print(f"Max Drawdown:       ${statistiques['max_drawdown']:.2f} ({statistiques['max_drawdown_pct']:.2f}%)")
-        print(f"-"*80)
-        print(f"📊 NOUVELLES MÉTRIQUES")
-        print(f"-"*80)
-        print(f"Durée totale:       {statistiques['total_days']} jours")
-        print(f"Trades/jour:        {statistiques['trades_per_day']:.2f}")
-        print(f"Moy. pos. ouvertes: {statistiques['avg_open_positions_per_day']:.2f}")
-        print(f"Max capital utilisé: ${statistiques['max_capital_used']:.2f} ({statistiques['max_capital_used_pct']:.2f}%)")
-    print("="*80)
+    if verbose:
+        print("="*80)
+        print("📈 RÉSULTATS DU BACKTEST")
+        print("="*80)
+        if statistiques and "total_trades" in statistiques:
+            print(f"Capital initial:    ${statistiques['initial_capital']:.2f}")
+            print(f"Capital final:      ${statistiques['final_capital']:.2f}")
+            print(f"Return:             {statistiques['capital_return_pct']:.2f}%")
+            print(f"-"*80)
+            print(f"Deals totaux:       {statistiques['total_trades']}")
+            print(f"Ordres totaux:      {statistiques['total_orders_placed']} (BO + SO)")
+            print(f"Positions totales:  {statistiques['total_individual_positions']} (comptage TradingView)")
+            print(f"Positions WIN:      {statistiques['winning_individual_positions']}")
+            print(f"Win Rate (TV):      {statistiques['win_rate_tradingview']:.2f}% (comme TradingView)")
+            print(f"Win Rate (Deals):   {statistiques['win_rate_deals']:.2f}% (deals complets)")
+            if statistiques.get('open_trades_at_end', 0) > 0:
+                print(f"⚠️ Trades ouverts:  {statistiques['open_trades_at_end']}")
+            print(f"-"*80)
+            print(f"PnL total:          ${statistiques['total_pnl']:.2f}")
+            print(f"PnL moyen/deal:     ${statistiques['avg_pnl_per_trade']:.2f}")
+            print(f"SO moyen/deal:      {float(statistiques.get('avg_so_per_trade', 0.0)):.1f}")
+            print(f"SO totaux placés:   {int(statistiques.get('total_so_placed', 0))}")
+            print(f"Max SO utilisé:     {int(statistiques.get('max_so_used', 0))}")
+            print(f"Max Drawdown:       ${statistiques['max_drawdown']:.2f} ({statistiques['max_drawdown_pct']:.2f}%)")
+            print(f"-"*80)
+            print(f"📊 NOUVELLES MÉTRIQUES")
+            print(f"-"*80)
+            print(f"Durée totale:       {statistiques['total_days']} jours")
+            print(f"Trades/jour:        {statistiques['trades_per_day']:.2f}")
+            print(f"Moy. pos. ouvertes: {statistiques['avg_open_positions_per_day']:.2f}")
+            print(f"Max capital utilisé: ${statistiques['max_capital_used']:.2f} ({statistiques['max_capital_used_pct']:.2f}%)")
+        print("="*80)
     
     return df_trades, courbe_equite, statistiques
 
@@ -1596,9 +1610,31 @@ def _calculate_individual_positions_multi(
 def backtest_smartbot_v2_multi_portfolio(
     assets_data: Dict[str, pd.DataFrame],
     parametres: ParametresDCA_SmartBotV2,
+    max_active_trades: int = 3,
+    verbose: bool = False,
+    legacy: bool = False
+) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.Series], Dict[str, Dict], pd.Series, Dict]:
+    """
+    Backtest SmartBot V2 portfolio multi-assets (version rapide numba, voir backtester_fast.py).
+
+    La logique par asset est celle de backtest_smartbot_v2 (mono-asset) : SO ATR / dernier SO / Base Order,
+    TP/SL/durée max, frais à la clôture, horaires de marché. Le portefeuille ajoute capital partagé et
+    limite max_active_trades.
+    legacy=True : ancienne implémentation (lente, logique SO/ATR/TP simplifiée), conservée pour comparaison.
+    """
+    if legacy:
+        return backtest_smartbot_v2_multi_portfolio_legacy(assets_data, parametres, max_active_trades)
+    from backtester_fast import backtest_portfolio_fast
+    return backtest_portfolio_fast(assets_data, parametres, max_active_trades, verbose=verbose)
+
+
+def backtest_smartbot_v2_multi_portfolio_legacy(
+    assets_data: Dict[str, pd.DataFrame],
+    parametres: ParametresDCA_SmartBotV2,
     max_active_trades: int = 3
 ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.Series], Dict[str, Dict], pd.Series, Dict]:
     """
+    [Référence lente, conservée pour comparaison]
     Backtest SmartBot V2 avec gestion de portfolio multi-assets
     
     Args:

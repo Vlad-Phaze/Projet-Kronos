@@ -143,7 +143,7 @@ class StrategyOptimizer:
             
             # Exécuter le backtest
             try:
-                trades, equity, stats = backtest_smartbot_v2(self.price_data, test_params)
+                trades, equity, stats = backtest_smartbot_v2(self.price_data, test_params, verbose=False)
                 execution_time = time.time() - start_time
                 
                 # Calculer le ratio gain/drawdown
@@ -253,7 +253,7 @@ class StrategyOptimizer:
             
             # Exécuter le backtest
             try:
-                trades, equity, stats = backtest_smartbot_v2(self.price_data, test_params)
+                trades, equity, stats = backtest_smartbot_v2(self.price_data, test_params, verbose=False)
                 execution_time = time.time() - start_time
                 
                 # Calculer le ratio gain/drawdown

@@ -4057,6 +4057,8 @@ def create_plotly_price_chart(df_price, trades_df, title: str = "Price Chart"):
         for _, trade in trades_df.iterrows():
             if 'exit_time' not in trade or 'exit_price' not in trade or pd.isna(trade['exit_time']):
                 continue
+            if bool(trade.get('is_open', False)):
+                continue  # trade encore ouvert : affiché plus bas comme "Trade En Cours"
 
             reason = str(trade.get('reason', 'TP')).upper()
             if reason == 'SL':
@@ -4116,6 +4118,9 @@ def create_plotly_price_chart(df_price, trades_df, title: str = "Price Chart"):
                 if pd.notna(trade['open_current_time']) and pd.notna(trade['open_current_price']):
                     open_dates.append(pd.to_datetime(trade['open_current_time']).strftime('%Y-%m-%d'))
                     open_prices.append(float(trade['open_current_price']))
+            elif bool(trade.get('is_open', False)) and pd.notna(trade.get('exit_time')):
+                open_dates.append(pd.to_datetime(trade['exit_time']).strftime('%Y-%m-%d'))
+                open_prices.append(float(trade['exit_price']))
 
         if open_dates:
             traces.append({
@@ -4652,7 +4657,7 @@ def _run_smartbot_optimizer(data: Dict[str, Any]) -> Dict[str, Any]:
                     trading_timeframe=timeframe,
                 )
 
-                trades, equity, stats = backtest_smartbot_v2(df, params)
+                trades, equity, stats = backtest_smartbot_v2(df, params, verbose=False)
                 symbol_score = float(stats.get(objective, stats.get('capital_return_pct', 0.0)))
                 objective_scores.append(symbol_score)
                 total_pnl += float(stats.get('total_pnl', 0.0))
