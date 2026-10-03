@@ -405,6 +405,54 @@ def test_evaluate_and_format(assets):
     print("OK  5. evaluate_portfolio coherent + format de sortie compatible")
 
 
+def deep_equal(a, b, path="root"):
+    """Egalité stricte récursive (dict / list / nombres / Timestamp)."""
+    if isinstance(a, dict):
+        assert isinstance(b, dict) and set(a) == set(b), f"{path}: clés {sorted(set(a) ^ set(b))}"
+        for k in a:
+            deep_equal(a[k], b[k], f"{path}.{k}")
+    elif isinstance(a, (list, tuple)):
+        assert len(a) == len(b), f"{path}: longueur {len(a)} != {len(b)}"
+        for i, (x, y) in enumerate(zip(a, b)):
+            deep_equal(x, y, f"{path}[{i}]")
+    else:
+        assert (a is None and b is None) or a == b or (a != a and b != b), f"{path}: {a!r} != {b!r}"
+
+
+def test_mono_fast():
+    """backtest_smartbot_v2_fast == backtest_smartbot_v2 : trades, positions, equity et stats complets."""
+    total = 0
+    dfs = {"1h": make_asset(4000, 7), "ragged": make_asset(3000, 5, drop_frac=0.1),
+           "naive": make_asset(2500, 11).tz_localize(None)}
+    cfgs = []
+    for mode, dsc, cl, cap in itertools.product(MODES, ["RSI", "RSI + MFI"], [False, True], [100_000.0, 3_500.0]):
+        cfgs.append(dict(pricedevbase=mode, dsc=dsc, close_last_trade=cl, initial_capital=cap))
+        cfgs.append(dict(pricedevbase=mode, dsc=dsc, close_last_trade=cl, initial_capital=cap,
+                         strategy_mode="stop_loss", stop_loss=3.0, max_trade_duration_bars=40,
+                         restrict_trading_to_us_market_hours=True))
+    cfgs.append(dict(pricedevbase="ATR", dsc="RSI", dsc_rsi_threshold_low=1))
+    cfgs.append(dict(pricedevbase="ATR", dsc="RSI", dsc_rsi_threshold_low=30, take_profit=500.0))
+    for label, df in dfs.items():
+        for kw in cfgs:
+            p = P(**{**BASE, **kw})
+            lab = f"mono_fast/{label}/{kw}"
+            m_trades, m_eq, m_stats = mono(df, p)
+            f_trades, f_eq, f_stats = bx.backtest_smartbot_v2_fast(df, p)
+            assert m_trades.empty == f_trades.empty, lab
+            if not m_trades.empty:
+                assert list(m_trades.columns) == list(f_trades.columns), lab
+                same_trades(m_trades, f_trades, lab)
+                deep_equal(m_trades["individual_positions"].tolist(), f_trades["individual_positions"].tolist(),
+                           lab + ".positions")
+            pd.testing.assert_series_equal(m_eq, f_eq, check_exact=True, check_freq=False, check_names=False,
+                                           obj=lab + " equity")
+            deep_equal(m_stats, f_stats, lab + ".stats")
+            total += len(m_trades)
+    assert total > 300, total
+    print(f"OK  7. mono rapide == mono d'origine: trades, positions, equity, stats ({total} deals)")
+    return total
+
+
 def test_wrapper(assets):
     p = P(**{**BASE, "pricedevbase": "ATR", "dsc": "RSI"})
     fast = bx.backtest_smartbot_v2_multi_portfolio(assets, p, 3)
@@ -425,6 +473,7 @@ def main():
     n = test_independence(asset_sets)
     n += test_single_asset()
     n += test_interactions(asset_sets)
+    n += test_mono_fast()
     test_evaluate_and_format(aligned)
     test_wrapper(aligned)
     assert n > 2000, f"jeu de test trop pauvre ({n} deals)"

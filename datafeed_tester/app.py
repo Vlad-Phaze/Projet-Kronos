@@ -42,7 +42,7 @@ from flask_cors import CORS
 
 # Import du backtester exact (sans reload forcé pour éviter les pics RAM)
 import backtester_exact
-from backtester_exact import ParametresDCA_SmartBotV2, backtest_smartbot_v2
+from backtester_exact import ParametresDCA_SmartBotV2, backtest_smartbot_v2, backtest_smartbot_v2_fast
 
 # Import du fetcher - Binance uniquement pour meilleure performance
 from fetcher import fetch_binance_only, expand_coin_inputs, EXCHANGES, fetch_ohlcv
@@ -2543,10 +2543,10 @@ def backtest():
         print(f"🎯 Signaux IS: {signal_is.sum()}, OOS: {signal_oos.sum()}")
         
         # Backtest IS avec SmartBot V2
-        trades_is, equity_is, stats_is = backtest_smartbot_v2(df_is, parametres_dca)
+        trades_is, equity_is, stats_is = backtest_smartbot_v2_fast(df_is, parametres_dca)
         
         # Backtest OOS avec SmartBot V2
-        trades_oos, equity_oos, stats_oos = backtest_smartbot_v2(df_oos, parametres_dca)
+        trades_oos, equity_oos, stats_oos = backtest_smartbot_v2_fast(df_oos, parametres_dca)
         
         print(f"🎯 Backtest IS: {stats_is.get('total_trades', 0)} trades, Return: {stats_is.get('capital_return_pct', 0):.2f}%")
         print(f"🎯 Backtest OOS: {stats_oos.get('total_trades', 0)} trades, Return: {stats_oos.get('capital_return_pct', 0):.2f}%")
@@ -3855,7 +3855,7 @@ def backtest_smartbot_v2_endpoint():
         
         # Exécution du backtest
         print(f"🚀 Lancement du backtest SmartBot V2...")
-        trades, equity, statistics = backtest_smartbot_v2(df, params)
+        trades, equity, statistics = backtest_smartbot_v2_fast(df, params)
         
         # DEBUG: Afficher les nouvelles métriques
         print(f"\n📊 STATISTICS RETOURNÉ PAR BACKTESTER:")
@@ -4657,7 +4657,7 @@ def _run_smartbot_optimizer(data: Dict[str, Any]) -> Dict[str, Any]:
                     trading_timeframe=timeframe,
                 )
 
-                trades, equity, stats = backtest_smartbot_v2(df, params, verbose=False)
+                trades, equity, stats = backtest_smartbot_v2_fast(df, params)
                 symbol_score = float(stats.get(objective, stats.get('capital_return_pct', 0.0)))
                 objective_scores.append(symbol_score)
                 total_pnl += float(stats.get('total_pnl', 0.0))

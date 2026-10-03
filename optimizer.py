@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 SmartBot V2 - Système d'Optimisation Automatique des Paramètres
 ===============================================================
@@ -25,7 +25,7 @@ import json
 # Import du backtester
 from backtester_exact import (
     ParametresDCA_SmartBotV2,
-    backtest_smartbot_v2,
+    backtest_smartbot_v2_fast,
 )
 
 
@@ -143,7 +143,7 @@ class StrategyOptimizer:
             
             # Exécuter le backtest
             try:
-                trades, equity, stats = backtest_smartbot_v2(self.price_data, test_params, verbose=False)
+                trades, equity, stats = backtest_smartbot_v2_fast(self.price_data, test_params)
                 execution_time = time.time() - start_time
                 
                 # Calculer le ratio gain/drawdown
@@ -253,7 +253,7 @@ class StrategyOptimizer:
             
             # Exécuter le backtest
             try:
-                trades, equity, stats = backtest_smartbot_v2(self.price_data, test_params, verbose=False)
+                trades, equity, stats = backtest_smartbot_v2_fast(self.price_data, test_params)
                 execution_time = time.time() - start_time
                 
                 # Calculer le ratio gain/drawdown

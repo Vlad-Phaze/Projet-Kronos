@@ -1607,6 +1607,17 @@ def _calculate_individual_positions_multi(
     return individual_positions
 
 
+def backtest_smartbot_v2_fast(
+    prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV2, verbose: bool = False
+) -> Tuple[pd.DataFrame, pd.Series, Dict]:
+    """
+    Version rapide (numba) de backtest_smartbot_v2 : mêmes calculs, même format de retour
+    (trades, equity, stats), résultats identiques. verbose=True utilise la version d'origine (logs détaillés).
+    """
+    from backtester_fast import backtest_mono_fast
+    return backtest_mono_fast(prix, parametres, verbose=verbose)
+
+
 def backtest_smartbot_v2_multi_portfolio(
     assets_data: Dict[str, pd.DataFrame],
     parametres: ParametresDCA_SmartBotV2,

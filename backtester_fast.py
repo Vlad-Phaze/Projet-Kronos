@@ -372,6 +372,8 @@ def _portfolio_kernel(
     order = np.empty(n_assets, np.int64)  # ordre d'ouverture des positions
     n_open = 0
     equity = np.empty(n_bars)
+    open_pos_sum = 0  # somme sur les barres de (BO + SO) ouverts -> moyenne de positions ouvertes
+    max_used = 0.0  # capital maximum engagé (fin de barre)
 
     tr_i = np.empty((1024, 5), np.int64)
     tr_f = np.empty((1024, 7), np.float64)
@@ -486,7 +488,11 @@ def _portfolio_kernel(
         for r in range(n_open):
             a = order[r]
             tot += qty[a] * lastpx[a]
+            open_pos_sum += 1 + so_cnt[a]
         equity[t] = tot
+        used = initial_capital - capital
+        if used > max_used:
+            max_used = used
 
     # ── Clôture forcée en fin de test (optionnelle, uniquement si la dernière barre est autorisée) ──
     w = 0
@@ -540,7 +546,7 @@ def _portfolio_kernel(
         n_tr += 1
 
     return (capital, n_open_end, equity, n_closed,
-            tr_i[:n_tr], tr_f[:n_tr], tr_sb[:n_tr], tr_sp[:n_tr], skipped)
+            tr_i[:n_tr], tr_f[:n_tr], tr_sb[:n_tr], tr_sp[:n_tr], skipped, open_pos_sum, max_used)
 
 
 def _tables(p: ParametresDCA_SmartBotV2):
@@ -644,7 +650,7 @@ def backtest_portfolio_fast(
     """
     prep = assets_data if isinstance(assets_data, PreparedPortfolio) else PreparedPortfolio(assets_data)
     p = parametres
-    capital, n_open_end, equity, n_closed, tr_i, tr_f, tr_sb, tr_sp, skipped = _run(prep, p, max_active_trades)
+    capital, n_open_end, equity, n_closed, tr_i, tr_f, tr_sb, tr_sp, skipped, _, _ = _run(prep, p, max_active_trades)
     so_sizes = _tables(p)[0]
     tl = prep.timeline
 
@@ -790,6 +796,240 @@ def backtest_portfolio_fast(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Mono-asset rapide : même signature et même format que backtester_exact.backtest_smartbot_v2
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def backtest_mono_fast(
+    prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV2, verbose: bool = False
+) -> Tuple[pd.DataFrame, pd.Series, Dict]:
+    """Équivalent rapide de ``backtest_smartbot_v2`` (mêmes trades, equity, stats, positions individuelles).
+
+    Utilise le noyau numba avec 1 asset et 1 slot. Retombe sur le mono-asset d'origine si ``verbose=True``
+    (logs détaillés demandés) ou si l'index n'est pas unique / trié.
+    """
+    from backtester_exact import backtest_smartbot_v2
+
+    for c in ("Open", "High", "Low", "Close"):
+        assert c in prix.columns, f"❌ Colonne manquante: {c}"
+    idx = prix.index
+    if verbose or len(prix) < 2 or not idx.is_unique or not idx.is_monotonic_increasing:
+        return backtest_smartbot_v2(prix, parametres, verbose=verbose)
+
+    p = parametres
+    n = len(prix)
+    prep = PreparedPortfolio({"X": prix})
+    (capital, n_open_end, equity, n_closed, tr_i, tr_f, tr_sb, tr_sp, _skipped,
+     open_pos_sum, max_used) = _run(prep, p, 1)
+    class _Ts:  # accès indexé mémoïsé (l'indexation d'un DatetimeIndex pandas est lente)
+        def __init__(self, index):
+            self._index, self._memo = index, {}
+
+        def __getitem__(self, i):
+            t = self._memo.get(i)
+            if t is None:
+                t = self._memo[i] = self._index[i]
+            return t
+
+    tl = _Ts(prep.timeline)
+    so_sizes = _tables(p)[0]
+    effective_stop_loss = p.stop_loss if p.strategy_mode == "stop_loss" else 0.0
+    n_all = len(tr_i)
+
+    def so_list(k):
+        c = int(tr_i[k, 3])
+        return [(tl[int(tr_sb[k, s])], float(tr_sp[k, s]), so_sizes[s], s + 1) for s in range(c)]
+
+    def closed_positions(k, exit_price, label):
+        base = float(tr_f[k, 0])
+        legs = [("BO_0", tl[int(tr_i[k, 1])], base, p.base_order)]
+        legs += [(f"SO_{num}", t_, pr, sz) for (t_, pr, sz, num) in so_list(k)]
+        out = []
+        for typ, e_time, e_price, size in legs:
+            q = size / e_price
+            proceeds = exit_price * q
+            fees = (size + proceeds) * p.commission
+            pnl = proceeds - size - fees
+            pos = {"type": typ, "entry_time": e_time, "entry_price": e_price, "size_usd": size, "qty": q,
+                   "exit_price": exit_price, "pnl": pnl, "pnl_pct": ((exit_price / e_price) - 1) * 100.0}
+            if label is not None:
+                pos["is_win"] = pnl > 0
+                pos["signal"] = label
+            out.append(pos)
+        return out
+
+    transactions = []
+    for k in range(n_closed):
+        code = int(tr_i[k, 4])
+        exit_price = float(tr_f[k, 2])
+        reason = str(_REASON_LABELS[code])
+        if code == _R_SL:
+            label = f"SL @ {effective_stop_loss}%"
+        elif code == _R_TP:
+            label = f"TP @ {p.take_profit}%"
+        elif code == _R_TIME:
+            label = f"TIME @ {p.max_trade_duration_bars} bars"
+        else:  # END : clôture forcée, positions sans is_win/signal comme le mono-asset
+            label = None
+        sl_ = so_list(k)
+        transactions.append({
+            "entry_time": tl[int(tr_i[k, 1])],
+            "exit_time": tl[int(tr_i[k, 2])],
+            "entry_price": float(tr_f[k, 0]),
+            "avg_entry_price": float(tr_f[k, 1]),
+            "exit_price": exit_price,
+            "reason": reason,
+            "so_count": int(tr_i[k, 3]),
+            "so_times": [x[0] for x in sl_],
+            "so_prices": [x[1] for x in sl_],
+            "total_invested": float(tr_f[k, 3]),
+            "total_position_size": float(tr_f[k, 4]),
+            "pnl": float(tr_f[k, 5]),
+            "pnl_pct": float(tr_f[k, 6]),
+            "individual_positions": closed_positions(k, exit_price, label),
+        })
+
+    open_trades_at_end = 0
+    open_trade_details = None
+    if n_open_end > 0:  # 1 seul slot : au plus une position ouverte
+        open_trades_at_end = 1
+        k = n_all - 1
+        cur = float(tr_f[k, 2])
+        base = float(tr_f[k, 0])
+        sl_ = so_list(k)
+        legs = [("BO_0", tl[int(tr_i[k, 1])], base, p.base_order)]
+        legs += [(f"SO_{num}", t_, pr, sz) for (t_, pr, sz, num) in sl_]
+        open_pos = []
+        for typ, e_time, e_price, size in legs:
+            q = size / e_price
+            proceeds = cur * q
+            fees = (size + proceeds) * p.commission
+            pnl = proceeds - size - fees
+            open_pos.append({"type": typ, "entry_time": e_time, "entry_price": e_price, "size_usd": size,
+                             "qty": q, "current_price": cur, "pnl": pnl,
+                             "pnl_pct": ((cur / e_price) - 1) * 100.0, "is_open": True, "is_win": pnl > 0})
+        open_trade_details = {
+            "entry_time": tl[int(tr_i[k, 1])],
+            "current_time": tl[-1],
+            "entry_price": base,
+            "avg_entry_price": float(tr_f[k, 1]),
+            "current_price": cur,
+            "so_count": int(tr_i[k, 3]),
+            "so_times": [x[0] for x in sl_],
+            "so_prices": [x[1] for x in sl_],
+            "total_invested": float(tr_f[k, 3]),
+            "total_position_size": float(tr_f[k, 4]),
+            "unrealized_pnl": float(tr_f[k, 5]),
+            "unrealized_pnl_pct": float(tr_f[k, 6]),
+            "individual_positions": open_pos,
+        }
+
+    df_trades = pd.DataFrame(transactions)
+    courbe_equite = pd.Series(equity, index=prix.index)
+
+    peak_equity = np.maximum.accumulate(equity)
+    drawdowns = equity - peak_equity
+    max_drawdown = float(np.min(drawdowns)) if len(drawdowns) > 0 else 0.0
+    drawdown_pct_array = np.where(peak_equity > 0, (drawdowns / peak_equity) * 100, 0.0)
+    max_drawdown_pct = float(np.min(drawdown_pct_array)) if len(drawdown_pct_array) > 0 else 0.0
+
+    total_days = max((prix.index[-1] - prix.index[0]).days, 1)
+    avg_open_positions = float(open_pos_sum / n)
+    max_capital_used = float(max_used)
+    max_capital_used_pct = (max_capital_used / p.initial_capital * 100) if p.initial_capital > 0 else 0.0
+
+    n_open_positions = len(open_trade_details["individual_positions"]) if open_trade_details else 0
+    unrealized = float(open_trade_details["unrealized_pnl"]) if open_trade_details else 0.0
+
+    if not df_trades.empty:
+        winning_trades = df_trades[df_trades["pnl"] > 0]
+        losing_trades = df_trades[df_trades["pnl"] <= 0]
+        time_closed_deals = int((df_trades["reason"] == "TIME").sum())
+        total_so_placed = int(df_trades["so_count"].sum())
+        total_individual_positions = 0
+        winning_individual_positions = 0
+        for plist in df_trades["individual_positions"]:
+            for pos in plist:
+                total_individual_positions += 1
+                if pos["pnl"] > 0:
+                    winning_individual_positions += 1
+        win_rate_tv = float(winning_individual_positions / total_individual_positions * 100) \
+            if total_individual_positions > 0 else 0.0
+        total_positions_including_open = int(total_individual_positions + n_open_positions)
+        total_pnl_value = float(df_trades["pnl"].sum()) + (unrealized if open_trade_details else 0.0)
+        ret_pct = float(total_pnl_value / p.initial_capital * 100) if p.initial_capital > 0 else 0.0
+        statistiques = {
+            "total_trades": total_positions_including_open,
+            "total_orders_placed": total_positions_including_open,
+            "total_deals": len(df_trades) + open_trades_at_end,
+            "total_so_placed": total_so_placed,
+            "winning_trades": len(winning_trades),
+            "losing_trades": len(losing_trades),
+            "total_individual_positions": total_individual_positions,
+            "winning_individual_positions": winning_individual_positions,
+            "win_rate_tradingview": win_rate_tv,
+            "win_rate_deals": float(len(winning_trades) / len(df_trades) * 100),
+            "total_pnl": total_pnl_value,
+            "avg_pnl_per_trade": float(df_trades["pnl"].mean()),
+            "avg_win": float(winning_trades["pnl"].mean()) if len(winning_trades) > 0 else 0.0,
+            "avg_loss": float(losing_trades["pnl"].mean()) if len(losing_trades) > 0 else 0.0,
+            "largest_win": float(df_trades["pnl"].max()),
+            "largest_loss": float(df_trades["pnl"].min()),
+            "avg_so_per_trade": float(df_trades["so_count"].mean()),
+            "max_so_used": int(df_trades["so_count"].max()),
+            "total_invested_avg": float(df_trades["total_invested"].mean()),
+            "max_drawdown": max_drawdown,
+            "max_drawdown_pct": max_drawdown_pct,
+            "initial_capital": float(p.initial_capital),
+            "final_capital": float(capital),
+            "capital_return_pct": ret_pct,
+            "open_trades_at_end": open_trades_at_end,
+            "time_closed_deals": time_closed_deals,
+            "open_trade": open_trade_details,
+            "trades_per_day": float(len(df_trades) / total_days),
+            "avg_open_positions_per_day": avg_open_positions,
+            "max_capital_used": max_capital_used,
+            "max_capital_used_pct": max_capital_used_pct,
+            "total_days": total_days,
+        }
+    else:
+        open_so_count = int(open_trade_details["so_count"]) if open_trade_details else 0
+        ret_pct = float(unrealized / p.initial_capital * 100) if p.initial_capital > 0 else 0.0
+        statistiques = {
+            "total_trades": int(n_open_positions),
+            "total_orders_placed": int(n_open_positions),
+            "total_deals": int(open_trades_at_end),
+            "total_so_placed": open_so_count,
+            "winning_trades": 0,
+            "losing_trades": 0,
+            "total_individual_positions": int(n_open_positions),
+            "winning_individual_positions": 0,
+            "win_rate_tradingview": 0.0,
+            "win_rate_deals": 0.0,
+            "total_pnl": unrealized,
+            "avg_pnl_per_trade": 0.0,
+            "avg_so_per_trade": float(open_so_count) if n_open_positions > 0 else 0.0,
+            "max_so_used": open_so_count,
+            "total_invested_avg": float(open_trade_details["total_invested"]) if open_trade_details else 0.0,
+            "max_drawdown": max_drawdown,
+            "max_drawdown_pct": max_drawdown_pct,
+            "initial_capital": float(p.initial_capital),
+            "final_capital": float(capital),
+            "capital_return_pct": ret_pct,
+            "open_trades_at_end": open_trades_at_end,
+            "time_closed_deals": 0,
+            "open_trade": open_trade_details,
+            "trades_per_day": 0.0,
+            "avg_open_positions_per_day": avg_open_positions,
+            "max_capital_used": max_capital_used,
+            "max_capital_used_pct": max_capital_used_pct,
+            "total_days": total_days,
+        }
+
+    return df_trades, courbe_equite, statistiques
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Évaluation légère + optimiseur
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -803,7 +1043,7 @@ def evaluate_portfolio(
     ouvertes), mesure pertinente pour une stratégie DCA qui peut terminer avec des positions ouvertes.
     ``n_trades`` ne compte que les deals clôturés.
     """
-    capital, n_open_end, equity, n_closed, tr_i, tr_f, _, _, skipped = _run(prep, params, max_active_trades)
+    capital, n_open_end, equity, n_closed, tr_i, tr_f, _, _, skipped, _, _ = _run(prep, params, max_active_trades)
     init = float(params.initial_capital)
     if len(equity):
         peak = np.maximum.accumulate(equity)
