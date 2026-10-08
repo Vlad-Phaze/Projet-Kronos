@@ -685,7 +685,7 @@
                                     </div>
                                     <div class="form-group">
                                         <label>Commission (%)</label>
-                                        <input type="number" id="commission" value="0.1" min="0" step="0.01">
+                                        <input type="number" id="commission" value="0" min="0" step="0.01">
                                     </div>
                                     <div class="form-group">
                                         <label>Max Trade Duration (bars)
@@ -821,7 +821,8 @@
             const params = {
                 symbol: document.getElementById('symbol').value,
                 quote: "USD",
-                exchange: "alpaca",  // ALPACA POUR LES STOCKS
+                exchange: "tradingview",
+                asset_type: "stock",
                 timeframe: document.getElementById('timeframe').value,
                 start_date: document.getElementById('start_date').value,
                 end_date: document.getElementById('end_date').value,

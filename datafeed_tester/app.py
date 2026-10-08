@@ -185,7 +185,36 @@ def _parse_grid_values(raw_values, cast_fn):
     return parsed
 
 
-def _load_single_asset_df(symbol: str, exchange_name: str, timeframe: str, start_date: str, end_date: str) -> pd.DataFrame:
+def _resolve_feed(exchange_name: str, data: Optional[Dict] = None) -> Tuple[str, str]:
+    """Retourne (source, kind). source: tradingview | alpaca | crypto. kind: stock | crypto."""
+    name = str(exchange_name or "").lower()
+    asset = ""
+    if isinstance(data, dict):
+        asset = str(data.get("asset_type") or "").lower()
+    if name in ("tradingview-stock", "tv-stock"):
+        return "tradingview", "stock"
+    if name in ("tradingview", "tv"):
+        kind = "stock" if asset in ("stock", "stocks", "equity") else "crypto"
+        return "tradingview", kind
+    if name == "alpaca":
+        return "alpaca", "stock"
+    return "crypto", "crypto"
+
+
+def _is_us_stock(exchange_name: str, data: Optional[Dict] = None) -> bool:
+    """Actions US : commission nulle, tick 0,01 et horaires de séance, comme l'ancien chemin Alpaca."""
+    return _resolve_feed(exchange_name, data)[1] == "stock"
+
+
+def _load_single_asset_df(
+    symbol: str,
+    exchange_name: str,
+    timeframe: str,
+    start_date: str,
+    end_date: str,
+    quote: str = "USDT",
+    asset_type: Optional[str] = None,
+) -> pd.DataFrame:
     """Charge et standardise les données OHLCV d'un seul asset pour backtest/optimisation."""
     from datetime import datetime as dt, timezone
 
@@ -203,8 +232,19 @@ def _load_single_asset_df(symbol: str, exchange_name: str, timeframe: str, start
         '1d': '1d'
     }
     tf = timeframe_map.get(timeframe, '1d')
+    source, kind = _resolve_feed(exchange_name, {"asset_type": asset_type} if asset_type else None)
 
-    if exchange_name.lower() == 'alpaca':
+    if source == "tradingview":
+        df = fetch_ohlcv(
+            exchange="tradingview",
+            symbol=symbol,
+            timeframe=tf,
+            since_ms=since_ms,
+            until_ms=until_ms,
+            quote=quote,
+            kind=kind,
+        )
+    elif source == "alpaca":
         df = fetch_ohlcv(
             exchange='alpaca',
             symbol=symbol,
@@ -270,6 +310,19 @@ def _load_single_asset_df(symbol: str, exchange_name: str, timeframe: str, start
         raise ValueError(f"Aucune donnée dans la période demandée {start_date} -> {end_date}")
 
     return df
+
+
+def _request_commission(data: Dict[str, Any], exchange_name: str) -> float:
+    """0 pour les actions si la requête n'envoie pas de commission, 0,1 % pour le reste."""
+    raw = data.get('commission', None) if isinstance(data, dict) else None
+    if raw is None or raw == '':
+        return 0.0 if _is_us_stock(exchange_name, data) else 0.001
+    return float(raw)
+
+
+def _request_price_tick(exchange_name: str, data: Optional[Dict] = None) -> float:
+    """Pas de prix de 1 centime sur les actions US, pour le test du take profit."""
+    return 0.01 if _is_us_stock(exchange_name, data) else 0.0
 
 
 def _parse_symbol_list(raw_symbols: Any) -> List[str]:
@@ -3633,24 +3686,27 @@ def backtest_smartbot_v2_endpoint():
         # ==============================================
         # ALPACA (US STOCKS) - Traitement direct
         # ==============================================
-        if exchange_name.lower() == "alpaca":
-            print(f"📈 Mode STOCKS US - Téléchargement {symbol} via Alpaca")
+        source, kind = _resolve_feed(exchange_name, data)
+        if source in ("alpaca", "tradingview"):
+            feed_label = "TradingView" if source == "tradingview" else "Alpaca"
+            print(f"📈 Téléchargement {symbol} via {feed_label}")
             
             try:
-                # Appel direct à fetch_ohlcv pour Alpaca
                 df = fetch_ohlcv(
-                    exchange="alpaca",
-                    symbol=symbol,  # Pour Alpaca, juste le ticker (ex: 'AAPL')
+                    exchange=source,
+                    symbol=symbol,
                     timeframe=tf,
                     since_ms=since_ms,
-                    until_ms=until_ms
+                    until_ms=until_ms,
+                    quote=data.get("quote") or "USDT",
+                    kind=kind,
                 )
                 
                 if df.empty:
-                    print(f"❌ Aucune donnée Alpaca pour {symbol}")
-                    return jsonify({"error": f"Aucune donnée disponible pour le stock {symbol} sur Alpaca. Vérifiez le ticker."}), 400
+                    print(f"❌ Aucune donnée {feed_label} pour {symbol}")
+                    return jsonify({"error": f"Aucune donnée disponible pour {symbol} via {feed_label}. Vérifiez le ticker."}), 400
                 
-                print(f"✅ {len(df)} bougies téléchargées depuis Alpaca")
+                print(f"✅ {len(df)} bougies téléchargées depuis {feed_label}")
                 
                 # Définir l'index datetime
                 if 'date' in df.columns:
@@ -3677,11 +3733,13 @@ def backtest_smartbot_v2_endpoint():
                     'volume': 'Volume'
                 })
                 
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
             except Exception as e:
-                print(f"❌ Erreur Alpaca: {e}")
+                print(f"❌ Erreur {feed_label}: {e}")
                 import traceback
                 traceback.print_exc()
-                return jsonify({"error": f"Erreur lors de la récupération des données Alpaca: {str(e)}"}), 500
+                return jsonify({"error": f"Erreur lors de la récupération des données {feed_label}: {str(e)}"}), 500
         
         # ==============================================
         # CRYPTO (BINANCE, COINBASE, etc.) - Multi-sources
@@ -3844,9 +3902,10 @@ def backtest_smartbot_v2_endpoint():
             
             # System Settings
             initial_capital=float(data.get('initial_capital', 100000.0)),
-            commission=float(data.get('commission', 0.001)),
+            commission=_request_commission(data, exchange_name),
+            price_tick=_request_price_tick(exchange_name, data),
             slippage_pourcent=float(data.get('slippage', 0.0)),
-            restrict_trading_to_us_market_hours=(exchange_name.lower() == 'alpaca'),
+            restrict_trading_to_us_market_hours=_is_us_stock(exchange_name, data),
             trading_timeframe=tf,
             # Par défaut, on garde la position ouverte en fin de période.
             close_last_trade=bool(data.get('close_last_trade', False)),
@@ -4217,8 +4276,9 @@ def backtest_smartbot_v2_multi_endpoint():
             bb_length=int(data.get('bb_length', 20)),
             bb_threshold_low=float(data.get('bb_threshold_low', 0.0)),
             initial_capital=float(data.get('initial_capital', 100000.0)),
-            commission=float(data.get('commission', 0.001)),
-            restrict_trading_to_us_market_hours=(exchange_name.lower() == 'alpaca'),
+            commission=_request_commission(data, exchange_name),
+            price_tick=_request_price_tick(exchange_name, data),
+            restrict_trading_to_us_market_hours=_is_us_stock(exchange_name, data),
             trading_timeframe=timeframe,
             # Par défaut, on garde les positions ouvertes en fin de période.
             close_last_trade=bool(data.get('close_last_trade', False)),
@@ -4239,8 +4299,10 @@ def backtest_smartbot_v2_multi_endpoint():
         # ALPACA (US STOCKS) - Téléchargement direct pour chaque stock
         # ==============================================
         fetch_t0 = time.perf_counter()
-        if exchange_name.lower() == "alpaca":
-            print(f"📈 Mode STOCKS US - Téléchargement {len(assets)} stocks via Alpaca")
+        source, kind = _resolve_feed(exchange_name, data)
+        if source in ("alpaca", "tradingview"):
+            feed_label = "TradingView" if source == "tradingview" else "Alpaca"
+            print(f"📈 Téléchargement {len(assets)} symboles via {feed_label}")
             
             fetch_data = {"__FINAL__": {}, "__FINAL_META__": {}}
             
@@ -4248,26 +4310,30 @@ def backtest_smartbot_v2_multi_endpoint():
                 try:
                     print(f"  📊 Téléchargement {asset}...")
                     df = fetch_ohlcv(
-                        exchange="alpaca",
+                        exchange=source,
                         symbol=asset,
                         timeframe=tf,
                         since_ms=since_ms,
-                        until_ms=until_ms
+                        until_ms=until_ms,
+                        quote=quote,
+                        kind=kind,
                     )
                     
                     if not df.empty:
                         fetch_data["__FINAL__"][asset] = df
-                        fetch_data["__FINAL_META__"][asset] = {"provenance": "alpaca", "symbol": asset}
+                        fetch_data["__FINAL_META__"][asset] = {"provenance": feed_label.lower(), "symbol": asset}
                         print(f"  ✅ {asset}: {len(df)} bougies")
                     else:
                         print(f"  ⚠️ {asset}: Aucune donnée")
                         
+                except ValueError as e:
+                    return jsonify({"error": str(e)}), 400
                 except Exception as e:
                     print(f"  ❌ {asset}: Erreur - {str(e)}")
                     continue
             
             if not fetch_data["__FINAL__"]:
-                return jsonify({"error": "Aucune donnée récupérée depuis Alpaca pour les stocks demandés"}), 400
+                return jsonify({"error": f"Aucune donnée récupérée depuis {feed_label} pour les symboles demandés"}), 400
         
         # ==============================================
         # CRYPTO - Binance uniquement (optimisation performance)
@@ -4540,7 +4606,9 @@ def _run_smartbot_optimizer(data: Dict[str, Any]) -> Dict[str, Any]:
                 exchange_name=exchange_name,
                 timeframe=timeframe,
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
+                quote=str(quote or "USDT"),
+                asset_type=data.get("asset_type"),
             )
             for symbol in symbols
         }
@@ -4567,7 +4635,8 @@ def _run_smartbot_optimizer(data: Dict[str, Any]) -> Dict[str, Any]:
             'bb_threshold_low': float(data.get('bb_threshold_low', 0.0)),
             'bb_mult': float(data.get('bb_mult', 2.0)),
             'initial_capital': float(data.get('initial_capital', 100000.0)),
-            'commission': float(data.get('commission', 0.001)),
+            'commission': _request_commission(data, exchange_name),
+            'price_tick': _request_price_tick(exchange_name, data),
             'close_last_trade': bool(data.get('close_last_trade', False)),
             'max_trade_duration_bars': int(data.get('max_trade_duration_bars', 0)),
         }
@@ -4652,8 +4721,9 @@ def _run_smartbot_optimizer(data: Dict[str, Any]) -> Dict[str, Any]:
                     bb_threshold_low=float(run_cfg['bb_threshold_low']),
                     initial_capital=float(run_cfg['initial_capital']),
                     commission=float(run_cfg['commission']),
+                    price_tick=float(run_cfg.get('price_tick', 0.0)),
                     close_last_trade=bool(run_cfg['close_last_trade']),
-                    restrict_trading_to_us_market_hours=(exchange_name.lower() == 'alpaca'),
+                    restrict_trading_to_us_market_hours=_is_us_stock(exchange_name, data),
                     trading_timeframe=timeframe,
                 )
 

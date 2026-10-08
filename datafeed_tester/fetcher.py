@@ -1,6 +1,8 @@
 # Pour rendre l'import explicite
 __all__ = [
     "fetch_binance_only",
+    "fetch_tradingview",
+    "fetch_ohlcv",
     "expand_coin_inputs",
     "fetch_top_markets",
     "EXCHANGES",
@@ -437,6 +439,64 @@ def fetch_ohlcv_ccxt(exchange_id: str, symbol: str, timeframe: str,
         return pd.DataFrame(columns=["timestamp","date","open","high","low","close","volume","exchange","pair"])
 
 
+# Fenêtre maximale Yahoo selon l'intervalle. Le 4h est construit à partir du 1h.
+_YF_LOOKBACK_DAYS = {
+    "1m": 7,
+    "5m": 60,
+    "15m": 60,
+    "1h": 730,
+    "4h": 730,
+}
+
+
+def _yahoo_window_error(timeframe: str, start_dt: datetime) -> Optional[str]:
+    """Message si le début demandé sort de la fenêtre intraday de Yahoo. None si c'est acceptable."""
+    max_days = _YF_LOOKBACK_DAYS.get(timeframe)
+    if max_days is None:
+        return None
+    age_days = (datetime.now(timezone.utc) - start_dt).days
+    if age_days <= max_days:
+        return None
+    return (
+        f"Yahoo Finance ne fournit le {timeframe} que sur les {max_days} derniers jours "
+        f"(début demandé il y a {age_days} jours). Réduis la période ou utilise le daily (1d)."
+    )
+
+
+def _aggregate_us_4h(df: pd.DataFrame) -> pd.DataFrame:
+    """Agrège des bougies 1h en deux bougies 4h de séance US : 09:30–13:30 et 13:30–16:00 (New York)."""
+    if df.empty:
+        return df
+    idx = df.index
+    if not isinstance(idx, pd.DatetimeIndex):
+        idx = pd.DatetimeIndex(pd.to_datetime(idx, utc=True))
+        df = df.copy()
+        df.index = idx
+    ny = idx.tz_localize("UTC").tz_convert("America/New_York") if idx.tz is None else idx.tz_convert("America/New_York")
+    minutes = ny.hour * 60 + ny.minute
+    session_open = 9 * 60 + 30
+    split = session_open + 240  # 13:30
+    in_am = (minutes >= session_open) & (minutes < split)
+    in_pm = (minutes >= split) & (minutes < 16 * 60)
+    keep = in_am | in_pm
+    work = df.loc[keep].copy()
+    if work.empty:
+        return work.iloc[0:0]
+    ny_keep = ny[keep]
+    bucket_min = np.where(in_am[keep], session_open, split)
+    starts = ny_keep.normalize() + pd.to_timedelta(bucket_min, unit="m")
+    work["_bucket"] = starts
+    agg = work.groupby("_bucket", sort=True).agg(
+        open=("open", "first"),
+        high=("high", "max"),
+        low=("low", "min"),
+        close=("close", "last"),
+        volume=("volume", "sum"),
+    )
+    agg.index.name = "date"
+    return agg.dropna(subset=["open"])
+
+
 def fetch_ohlcv_alpaca(symbol: str, timeframe: str,
                        since_ms: int, until_ms: int,
                        errors: Optional[List[Dict]] = None) -> pd.DataFrame:
@@ -455,49 +515,33 @@ def fetch_ohlcv_alpaca(symbol: str, timeframe: str,
     """
     global _api_call_counter
     
-    # OPTIMISATION: Vérifier le cache d'abord
-    cache_key = _get_cache_key("yfinance", symbol, timeframe, since_ms, until_ms)
+    tf_map = {
+        "1m": "1m",
+        "5m": "5m",
+        "15m": "15m",
+        "1h": "1h",
+        "4h": "1h",  # Yahoo n'a pas de 4h : on télécharge du 1h puis on agrège
+        "1d": "1d",
+    }
+    if timeframe not in tf_map:
+        raise ValueError(f"Timeframe non supporté pour les actions : {timeframe}. Choisis 1m, 5m, 15m, 1h, 4h ou 1d.")
+
+    start_dt = datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc)
+    end_dt = datetime.fromtimestamp(until_ms / 1000, tz=timezone.utc)
+    window_error = _yahoo_window_error(timeframe, start_dt)
+    if window_error:
+        raise ValueError(window_error)
+
+    # Clé distincte de l'ancien cache (prix non ajustés, 4h stocké en 1h).
+    cache_key = _get_cache_key("yfinance_adj", symbol, timeframe, since_ms, until_ms)
     cached_data = _load_from_cache(cache_key)
     if cached_data is not None:
         print(f'      💾 CACHE HIT: yfinance - {symbol}', flush=True)
         return cached_data
+
+    yf_interval = tf_map[timeframe]
     
     try:
-        # Convertir le timeframe au format yfinance
-        tf_map = {
-            "1m": "1m",
-            "5m": "5m",
-            "15m": "15m",
-            "1h": "1h",
-            "4h": "4h",  # Note: yfinance n'a pas 4h, on utilisera 1h
-            "1d": "1d",
-        }
-        
-        if timeframe not in tf_map:
-            log_error(errors, "fetch_ohlcv_alpaca", f"Timeframe non supporté: {timeframe}",
-                      code="INVALID_TIMEFRAME", context={"symbol": symbol, "timeframe": timeframe})
-            return pd.DataFrame(columns=["timestamp","date","open","high","low","close","volume","exchange","pair"])
-        
-        yf_interval = tf_map[timeframe]
-        
-        # Pour 4h, utiliser 1h car yfinance ne supporte pas 4h directement
-        if timeframe == "4h":
-            yf_interval = "1h"
-        
-        # Convertir timestamps ms en datetime
-        start_dt = datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc)
-        end_dt = datetime.fromtimestamp(until_ms / 1000, tz=timezone.utc)
-        
-        # Yahoo Finance limite: données intraday (< 1d) seulement pour les 730 derniers jours
-        # Si la période demandée dépasse 730 jours et qu'on demande du intraday, basculer sur 1d
-        days_requested = (end_dt - start_dt).days
-        if days_requested > 730 and timeframe != "1d":
-            print(f'      ⚠️  Période de {days_requested} jours dépasse la limite de 730j pour {timeframe}', flush=True)
-            print(f'      ↪️  Bascule automatique sur timeframe 1d (données journalières)', flush=True)
-            yf_interval = "1d"
-            # Mettre à jour le cache key pour refléter le timeframe réel utilisé
-            cache_key = _get_cache_key("yfinance", symbol, "1d", since_ms, until_ms)
-        
         with _api_call_lock:
             _api_call_counter += 1
             print(f'      🌐 API Call #{_api_call_counter}: yfinance - {symbol}', flush=True)
@@ -508,8 +552,8 @@ def fetch_ohlcv_alpaca(symbol: str, timeframe: str,
             start=start_dt,
             end=end_dt,
             interval=yf_interval,
-            auto_adjust=False,  # Garder les prix non ajustés
-            actions=False  # Pas besoin des dividendes/splits
+            auto_adjust=True,  # OHLC ajustés des splits et dividendes
+            actions=False,
         )
         
         if df.empty:
@@ -525,7 +569,13 @@ def fetch_ohlcv_alpaca(symbol: str, timeframe: str,
             "Close": "close",
             "Volume": "volume"
         })
-        
+        df = df[[c for c in ("open", "high", "low", "close", "volume") if c in df.columns]]
+        if timeframe == "4h":
+            print(f'      ↪️  Agrégation 1h → 4h séance US pour {symbol}', flush=True)
+            df = _aggregate_us_4h(df)
+            if df.empty:
+                raise ValueError(f"Impossible d'agréger {symbol} en bougies 4h sur cette période.")
+
         # Réinitialiser l'index pour avoir la date comme colonne
         df = df.reset_index()
         df = df.rename(columns={"index": "date", "Date": "date", "Datetime": "date"})
@@ -554,36 +604,139 @@ def fetch_ohlcv_alpaca(symbol: str, timeframe: str,
         
         return result
         
+    except ValueError:
+        raise
     except Exception as e:
         log_error(errors, "fetch_ohlcv_alpaca", "Erreur pendant le téléchargement depuis Yahoo Finance.",
                   code="FETCH_FAIL", details=e, context={"symbol": symbol, "timeframe": timeframe})
         return pd.DataFrame(columns=["timestamp","date","open","high","low","close","volume","exchange","pair"])
 
 
+TV_BRIDGE_URL = os.environ.get("TV_BRIDGE_URL", "http://127.0.0.1:8787").rstrip("/")
+
+
+def fetch_ohlcv_tradingview(symbol: str, timeframe: str,
+                            since_ms: int, until_ms: int,
+                            quote: str = "USDT", kind: str = "crypto",
+                            errors: Optional[List[Dict]] = None) -> pd.DataFrame:
+    """Bougies OHLCV via le bridge Node TradingView (`tv_bridge/server.js`)."""
+    global _api_call_counter
+
+    kind = "stock" if str(kind).lower() in ("stock", "stocks", "equity") else "crypto"
+    quote = (quote or "USDT").upper()
+    if kind == "crypto" and quote == "USD":
+        quote = "USDT"
+
+    cache_key = _get_cache_key(f"tradingview_{kind}_{quote}", symbol, timeframe, since_ms, until_ms)
+    cached_data = _load_from_cache(cache_key)
+    if cached_data is not None:
+        print(f"      💾 CACHE HIT: tradingview - {symbol}", flush=True)
+        return cached_data
+
+    headers = {}
+    token = os.environ.get("TV_BRIDGE_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        with _api_call_lock:
+            _api_call_counter += 1
+            print(f"      🌐 API Call #{_api_call_counter}: tradingview - {symbol}", flush=True)
+        response = requests.get(
+            f"{TV_BRIDGE_URL}/ohlcv",
+            params={
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "since": int(since_ms),
+                "until": int(until_ms),
+                "quote": quote,
+                "kind": kind,
+            },
+            headers=headers,
+            timeout=(10, 300),
+        )
+    except requests.exceptions.ConnectionError as e:
+        message = (
+            f"Le bridge TradingView ne répond pas sur {TV_BRIDGE_URL}. "
+            "Lance `node server.js` dans le dossier tv_bridge."
+        )
+        log_error(errors, "fetch_ohlcv_tradingview", message, code="BRIDGE_DOWN", details=e)
+        raise ValueError(message) from e
+    except requests.exceptions.Timeout as e:
+        message = f"Délai dépassé en attendant les bougies TradingView pour {symbol}."
+        log_error(errors, "fetch_ohlcv_tradingview", message, code="TIMEOUT", details=e)
+        raise ValueError(message) from e
+
+    if response.status_code >= 400:
+        try:
+            message = response.json().get("error") or response.text
+        except Exception:
+            message = response.text
+        message = f"TradingView ({symbol}): {message}"
+        log_error(errors, "fetch_ohlcv_tradingview", message, code=f"HTTP_{response.status_code}")
+        raise ValueError(message)
+
+    payload = response.json()
+    candles = payload.get("candles") or []
+    resolved = payload.get("symbol") or symbol
+    if not candles:
+        message = f"Aucune bougie TradingView pour {resolved}."
+        log_error(errors, "fetch_ohlcv_tradingview", message, code="EMPTY_OHLCV", context={"symbol": resolved})
+        raise ValueError(message)
+
+    if payload.get("truncated"):
+        print(
+            f"      ⚠️ Historique TradingView incomplet pour {resolved}. "
+            "Renseigne TV_SESSION et TV_SIGNATURE dans tv_bridge/.env pour aller plus loin.",
+            flush=True,
+        )
+
+    df = pd.DataFrame(candles)
+    for col in ("open", "high", "low", "close", "volume"):
+        if col not in df.columns:
+            df[col] = 0.0
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["volume"] = df["volume"].fillna(0.0)
+    df["timestamp"] = (pd.to_numeric(df["time"], errors="coerce") * 1000).astype("int64")
+    df["date"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    df["exchange"] = "tradingview"
+    df["pair"] = resolved
+    df = df[(df["timestamp"] >= since_ms) & (df["timestamp"] <= until_ms)]
+    df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    result = df[["timestamp", "date", "open", "high", "low", "close", "volume", "exchange", "pair"]]
+    _save_to_cache(cache_key, result)
+    return result
+
+
 def fetch_ohlcv(exchange: str, symbol: str, timeframe: str,
                 since_ms: int, until_ms: int, limit: int = 1000,
-                errors: Optional[List[Dict]] = None) -> pd.DataFrame:
+                errors: Optional[List[Dict]] = None,
+                quote: str = "USDT", kind: str = "crypto") -> pd.DataFrame:
     """
     Fonction dispatcher pour récupérer OHLCV depuis différentes sources.
     
     Args:
-        exchange: 'binance', 'coinbase', 'alpaca', etc.
-        symbol: Pour crypto: 'BTC/USD', pour stocks: 'AAPL'
+        exchange: 'tradingview', 'binance', 'coinbase', 'alpaca', etc.
+        symbol: Pour crypto: 'BTC' ou 'BINANCE:BTCUSDT', pour stocks: 'AAPL'
         timeframe: '1m', '5m', '15m', '1h', '4h', '1d'
         since_ms: Timestamp de début en millisecondes
         until_ms: Timestamp de fin en millisecondes
         limit: Nombre max de barres par requête (pour CCXT)
         errors: Liste pour logger les erreurs
+        quote: Quote crypto utilisée pour construire le symbole TradingView
+        kind: 'crypto' ou 'stock' pour la résolution TradingView
     
     Returns:
         DataFrame avec colonnes: timestamp, date, open, high, low, close, volume, exchange, pair
     """
-    if exchange.lower() == "alpaca":
+    name = exchange.lower()
+    if name in ("tradingview", "tv"):
+        return fetch_ohlcv_tradingview(symbol, timeframe, since_ms, until_ms, quote=quote, kind=kind, errors=errors)
+    if name == "alpaca":
         # Pour Alpaca, le symbol est juste le ticker (ex: 'AAPL')
         return fetch_ohlcv_alpaca(symbol, timeframe, since_ms, until_ms, errors)
-    else:
-        # Pour les exchanges crypto via CCXT
-        return fetch_ohlcv_ccxt(exchange, symbol, timeframe, since_ms, until_ms, limit, errors)
+    # Pour les exchanges crypto via CCXT
+    return fetch_ohlcv_ccxt(exchange, symbol, timeframe, since_ms, until_ms, limit, errors)
 
 
 # =========================
@@ -896,6 +1049,95 @@ def fetch_binance_only(bases: List[str],
     
     print(f'   ✅ BINANCE ONLY COMPLETE: Total API calls = {_api_call_counter}')
     
+    return agg, detail, data
+
+
+def fetch_tradingview(exchanges: List[str],
+                      bases: List[str],
+                      timeframe: str,
+                      lookback_days: int,
+                      preferred_quotes=PREFERRED_QUOTES,
+                      since_ms: Optional[int] = None,
+                      until_ms: Optional[int] = None,
+                      selection: str = "best",
+                      quote: Optional[str] = None,
+                      kind: Optional[str] = None):
+    """
+    Récupère les bougies TradingView pour chaque base.
+    Retourne (agg, detail, data), même forme que fetch_binance_only.
+    `exchanges` peut porter le marché et la quote pour le cache :
+    ["tradingview", "stock"] ou ["tradingview", "crypto", "USDT"].
+    """
+    global _api_call_counter
+    with _api_call_lock:
+        _api_call_counter = 0
+
+    inferred_kind = "crypto"
+    inferred_quote = "USDT"
+    for item in exchanges or []:
+        token = str(item).strip()
+        low = token.lower()
+        if low in ("stock", "stocks", "equity"):
+            inferred_kind = "stock"
+        elif low == "crypto":
+            inferred_kind = "crypto"
+        elif low not in ("tradingview", "tv"):
+            inferred_quote = token.upper()
+    if kind is None:
+        kind = inferred_kind
+    if quote is None:
+        quote = inferred_quote
+
+    errors: List[Dict] = []
+    if since_ms is None or until_ms is None:
+        until_dt = datetime.now(timezone.utc)
+        since_dt = until_dt - timedelta(days=lookback_days)
+        since_ms = int(since_dt.timestamp() * 1000)
+        until_ms = int(until_dt.timestamp() * 1000)
+
+    print(f"   📈 TRADINGVIEW: {len(bases)} symboles ({kind}, quote={quote})")
+    rows = []
+    data: Dict[str, Dict] = {"tradingview": {}, "__FINAL__": {}, "__FINAL_META__": {}, "__ERRORS__": errors}
+
+    for base in bases:
+        print(f"  📊 Fetching {base} from TradingView...")
+        try:
+            df = fetch_ohlcv(
+                "tradingview", base, timeframe, since_ms, until_ms,
+                quote=quote, kind=kind, errors=errors,
+            )
+        except ValueError as e:
+            log_error(errors, "fetch_tradingview", str(e), code="FETCH_FAIL", context={"base": base})
+            print(f"    ❌ {base}: {e}")
+            continue
+        if df.empty:
+            continue
+        pair = str(df["pair"].iloc[0]) if "pair" in df.columns and not df.empty else base
+        data["tradingview"][base] = df
+        data["__FINAL__"][base] = df[["timestamp", "date", "open", "high", "low", "close", "volume"]].copy()
+        data["__FINAL_META__"][base] = {
+            "mode": "tradingview",
+            "exchange": "tradingview",
+            "pair": pair,
+            "score": 1.0,
+            "provenance": f"Données issues de TradingView ({pair})",
+        }
+        rows.append({
+            "exchange": "tradingview",
+            "base_input": base,
+            "base": base,
+            "pair": pair,
+            "score": 1.0,
+            "rows": len(df),
+        })
+        print(f"    ✅ {base} @ TradingView → {pair} | {len(df)} rows")
+
+    detail = pd.DataFrame(rows)
+    if not detail.empty:
+        agg = pd.DataFrame([{"exchange": "tradingview", "mean_score": 1.0}])
+    else:
+        agg = pd.DataFrame(columns=["exchange", "mean_score"])
+    print(f"   ✅ TRADINGVIEW COMPLETE: Total API calls = {_api_call_counter}")
     return agg, detail, data
 
 

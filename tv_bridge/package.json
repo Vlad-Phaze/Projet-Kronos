@@ -1,0 +1,14 @@
+{
+  "name": "kronos-tv-bridge",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@mathieuc/tradingview": "^4.0.0"
+  }
+}

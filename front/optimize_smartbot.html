@@ -125,8 +125,10 @@
                     <div class="form-group">
                         <label>Exchange</label>
                         <select id="exchange">
+                            <option value="tradingview" selected>Crypto (TradingView)</option>
+                            <option value="tradingview-stock">Stocks (TradingView)</option>
                             <option value="binance">Crypto (Binance)</option>
-                            <option value="alpaca">Stocks (Alpaca)</option>
+                            <option value="alpaca">Stocks (Yahoo)</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -432,8 +434,10 @@
                 return;
             }
 
-            const exchange = document.getElementById('exchange').value;
-            const quote = exchange === 'alpaca' ? 'USD' : 'USDT';
+            const exchangeValue = document.getElementById('exchange').value;
+            const assetType = (exchangeValue === 'tradingview-stock' || exchangeValue === 'alpaca') ? 'stock' : 'crypto';
+            const exchange = exchangeValue === 'tradingview-stock' ? 'tradingview' : exchangeValue;
+            const quote = assetType === 'stock' ? 'USD' : 'USDT';
 
             const paramGrid = {};
             parameters.forEach((p) => {
@@ -445,6 +449,7 @@
                 symbols,
                 quote,
                 exchange,
+                asset_type: assetType,
                 timeframe: document.getElementById('timeframe').value,
                 start_date: document.getElementById('start_date').value,
                 end_date: document.getElementById('end_date').value,

@@ -18,6 +18,11 @@ class ParametresDCA_SmartBotV2:
     dsc: str = "RSI + MFI"  # Options: "RSI", "Bollinger Band %", "MFI", "RSI + BB", "RSI + MFI", "BB + MFI", "All Three"
     dsc2_enabled: bool = False
     dsc2: str = "Bollinger Band %"  # Secondary condition (if enabled)
+    # Level = valeur sous le seuil. Crossover = le seuil est franchi vers le haut (ta.crossover).
+    # Crossunder = franchi vers le bas. Le script v3.2 verrouille RSI en Crossover, BB et MFI en Level.
+    rsi_trigger_mode: str = "Level"
+    bb_trigger_mode: str = "Level"
+    mfi_trigger_mode: str = "Level"
     
     # ═══════════════════════════════════════════════════════════
     # ORDER SETTINGS
@@ -81,6 +86,12 @@ class ParametresDCA_SmartBotV2:
     close_last_trade: bool = False  # Si False, garde le dernier trade ouvert à la fin
     restrict_trading_to_us_market_hours: bool = False
     trading_timeframe: str = "1d"
+    # 0 = prix brut. Sinon, high/close sont arrondis à ce pas (syminfo.mintick, 0.01
+    # sur les actions US) avant le test du take profit. Le prix limite reste exact.
+    price_tick: float = 0.0
+    # True : un BO ou un SO plus gros que le cash est ignoré.
+    # False : margin_long=0, l'ordre est exécuté même si le cash ne le couvre pas.
+    check_cash: bool = True
 
 
 def est_dans_session_marche_us(timestamp: pd.Timestamp, timeframe: str) -> bool:
@@ -109,6 +120,48 @@ def barre_autorisee(timestamp: pd.Timestamp, parametres: ParametresDCA_SmartBotV
     return est_dans_session_marche_us(timestamp, parametres.trading_timeframe)
 
 
+def bb_percent_tv(close: pd.Series, length: int, mult: float) -> np.ndarray:
+    """BB% Pine : SMA et ``ta.stdev`` biaisé (division par N, ddof=0). 0 = bande basse."""
+    mid = close.rolling(length, min_periods=length).mean()
+    dev = float(mult) * close.rolling(length, min_periods=length).std(ddof=0)
+    lower = (mid - dev).to_numpy(dtype=float)
+    span = (2.0 * dev).to_numpy(dtype=float)
+    span = np.where((span == 0) | ~np.isfinite(span), 1.0, span)
+    out = (close.to_numpy(dtype=float) - lower) / span
+    return np.nan_to_num(out, nan=0.5)
+
+
+def _trigger_mask(values: np.ndarray, mode: str, level: float) -> np.ndarray:
+    """Level / Crossover / Crossunder, mêmes définitions que ``ta.crossover`` / ``ta.crossunder``."""
+    level = float(level)
+    if mode == "Crossover":
+        prev = np.empty_like(values, dtype=float)
+        prev[0] = np.nan
+        prev[1:] = values[:-1]
+        return (prev <= level) & (values > level)
+    if mode == "Crossunder":
+        prev = np.empty_like(values, dtype=float)
+        prev[0] = np.nan
+        prev[1:] = values[:-1]
+        return (prev >= level) & (values < level)
+    return values < level
+
+
+def _trigger_at(values: np.ndarray, t: int, mode: str, level: float) -> bool:
+    level = float(level)
+    cur = values[t]
+    if mode == "Level":
+        return bool(cur < level)
+    if t == 0 or not np.isfinite(cur) or not np.isfinite(values[t - 1]):
+        return False
+    prev = values[t - 1]
+    if mode == "Crossover":
+        return bool(prev <= level and cur > level)
+    if mode == "Crossunder":
+        return bool(prev >= level and cur < level)
+    return bool(cur < level)
+
+
 def calculer_indicateurs_smartbot(prix_df: pd.DataFrame, parametres: ParametresDCA_SmartBotV2) -> Dict[str, np.ndarray]:
     """Calcule TOUS les indicateurs nécessaires pour SmartBot V2"""
     close = prix_df['Close'].to_numpy()
@@ -133,21 +186,7 @@ def calculer_indicateurs_smartbot(prix_df: pd.DataFrame, parametres: ParametresD
     # Bollinger Bands Percentage
     # ═══════════════════════════════════════════════════════════
     try:
-        bb = ta.bbands(prix_df['Close'], length=parametres.bb_length, std=parametres.bb_mult)
-        if bb is not None and not bb.empty:
-            lower_col = [col for col in bb.columns if 'BBL' in col][0]
-            upper_col = [col for col in bb.columns if 'BBU' in col][0]
-            bb_lower = bb[lower_col].to_numpy()
-            bb_upper = bb[upper_col].to_numpy()
-            
-            # BB% = (price - lower) / (upper - lower)
-            # 0 = at lower band, 1 = at upper band
-            bb_range = bb_upper - bb_lower
-            bb_range[bb_range == 0] = 1.0  # Éviter division par zéro
-            bb_percent = (close - bb_lower) / bb_range
-            indicators['bb_percent'] = np.nan_to_num(bb_percent, nan=0.5)
-        else:
-            indicators['bb_percent'] = np.full(n, 0.5)
+        indicators['bb_percent'] = bb_percent_tv(prix_df['Close'], parametres.bb_length, parametres.bb_mult)
     except Exception as e:
         print(f"⚠️ Erreur BB%: {e}")
         indicators['bb_percent'] = np.full(n, 0.5)
@@ -184,10 +223,9 @@ def evaluer_entry_signal_vectorized(indicators: Dict[str, np.ndarray], parametre
     """
     n = len(indicators['rsi'])
     
-    # Signaux individuels vectorisés
-    rsi_signal = indicators['rsi'] < parametres.dsc_rsi_threshold_low
-    bb_signal = indicators['bb_percent'] < parametres.bb_threshold_low
-    mfi_signal = indicators['mfi'] < parametres.mfi_threshold_low
+    rsi_signal = _trigger_mask(indicators['rsi'], parametres.rsi_trigger_mode, parametres.dsc_rsi_threshold_low)
+    bb_signal = _trigger_mask(indicators['bb_percent'], parametres.bb_trigger_mode, parametres.bb_threshold_low)
+    mfi_signal = _trigger_mask(indicators['mfi'], parametres.mfi_trigger_mode, parametres.mfi_threshold_low)
     
     # Signal primaire basé sur DSC
     if parametres.dsc == "RSI":
@@ -225,14 +263,9 @@ def evaluer_entry_signal_vectorized(indicators: Dict[str, np.ndarray], parametre
 
 def evaluer_entry_signal(indicators: Dict[str, np.ndarray], t: int, parametres: ParametresDCA_SmartBotV2) -> bool:
     """Évalue le signal d'entrée selon la configuration DSC (Deal Start Condition)"""
-    rsi = indicators['rsi'][t]
-    bb_pct = indicators['bb_percent'][t]
-    mfi = indicators['mfi'][t]
-    
-    # Individual signals
-    rsi_signal = rsi < parametres.dsc_rsi_threshold_low
-    bb_signal = bb_pct < parametres.bb_threshold_low
-    mfi_signal = mfi < parametres.mfi_threshold_low
+    rsi_signal = _trigger_at(indicators['rsi'], t, parametres.rsi_trigger_mode, parametres.dsc_rsi_threshold_low)
+    bb_signal = _trigger_at(indicators['bb_percent'], t, parametres.bb_trigger_mode, parametres.bb_threshold_low)
+    mfi_signal = _trigger_at(indicators['mfi'], t, parametres.mfi_trigger_mode, parametres.mfi_threshold_low)
     
     # Primary signal based on DSC selection
     if parametres.dsc == "RSI":
@@ -308,6 +341,16 @@ def calcular_so_trigger_price(parametres: ParametresDCA_SmartBotV2, base_order_p
     return trigger_price
 
 
+def order_fill(notional: float, price: float):
+    """Quantité et coût. Pine : math.max(notional / price, 1). Au-dessus d'un titre, le coût reste le nominal."""
+    if price <= 0:
+        return 0.0, 0.0
+    raw = notional / price
+    if raw < 1.0:
+        return 1.0, float(price)
+    return raw, float(notional)
+
+
 def calcular_so_size(parametres: ParametresDCA_SmartBotV2, so_number: int) -> float:
     """Calcule la taille du Safety Order avec scaling"""
     return parametres.safe_order * (parametres.safe_order_volume_scale ** so_number)
@@ -343,6 +386,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     close = prix["Close"].to_numpy(dtype=float)
     high = prix["High"].to_numpy(dtype=float)
     low = prix["Low"].to_numpy(dtype=float)
+    open_px = prix["Open"].to_numpy(dtype=float)
     n = len(close)
     indice = prix.index
     
@@ -350,6 +394,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     # VARIABLES D'ÉTAT (comme Pine Script)
     # ═══════════════════════════════════════════════════════════
     in_trade = False
+    tp_order_live = False
     base_order_price = None
     last_so_price = None
     avg_entry_price = None
@@ -406,7 +451,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
         # ═══════════════════════════════════════════════════════════
         if not in_trade and t != last_close_bar and entry_signal and market_bar_allowed:
             # Vérifier capital disponible
-            if capital_disponible < parametres.base_order:
+            qty, order_cost = order_fill(parametres.base_order, price)
+            if parametres.check_cash and capital_disponible < order_cost:
                 skipped_trades += 1
                 if verbose:
                     print(f"⚠️ [{indice[t].strftime('%Y-%m-%d')}] TRADE SKIPPED - Capital insuffisant (${capital_disponible:.2f} < ${parametres.base_order})")
@@ -417,16 +463,16 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 last_so_price = price
                 current_so_count = 0
                 entry_bar = t
+                tp_order_live = False
                 current_trade_so_list = []  # Reset la liste des SO pour ce nouveau trade
                 
                 # Calculate position
-                qty = parametres.base_order / price
                 total_position_size = qty
-                total_invested = parametres.base_order
+                total_invested = order_cost
                 avg_entry_price = price
                 
                 # Déduire du capital
-                capital_disponible -= parametres.base_order
+                capital_disponible -= order_cost
                 # OPTIMISATION: Utiliser array indexing au lieu de append()
                 if capital_event_idx < max_capital_events:
                     capital_history_array[capital_event_idx] = capital_disponible
@@ -454,8 +500,15 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             if effective_stop_loss > 0:
                 sl_price = avg_entry_price * (1 - effective_stop_loss / 100.0)
             
-            # Priorité SL si TP+SL touchés sur la même bougie (hypothèse conservatrice).
-            tp_hit = high[t] >= tp_price
+            # L'ordre limite est créé à la clôture de cette barre s'il n'était pas déjà en carnet.
+            # Tant qu'il n'est pas en carnet, seule la clôture peut le remplir. Ensuite, la mèche suffit.
+            # TradingView arrondit le prix de la bougie au mintick avant de le comparer au limite.
+            touch = high[t] if tp_order_live else price
+            if parametres.price_tick > 0:
+                touch = np.floor(touch / parametres.price_tick + 0.5) * parametres.price_tick
+                tp_hit = touch + 1e-6 >= tp_price
+            else:
+                tp_hit = touch >= tp_price
             sl_hit = sl_price is not None and low[t] <= sl_price
 
             time_exit_hit = (
@@ -466,7 +519,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             if tp_hit or sl_hit or time_exit_hit:
                 # CLOSE DEAL
                 if sl_hit:
-                    exit_price = sl_price
+                    # Gap : l'open est déjà sous le stop, on sort au premier prix de la barre.
+                    exit_price = open_px[t] if open_px[t] <= sl_price else sl_price
                     exit_reason = "SL"
                 elif tp_hit:
                     exit_price = tp_price
@@ -492,17 +546,17 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 individual_positions = []
                 
                 # 1. Base Order P&L
-                bo_qty = parametres.base_order / base_order_price
+                bo_qty, bo_cost = order_fill(parametres.base_order, base_order_price)
                 bo_proceeds = exit_price * bo_qty
-                bo_fees = (parametres.base_order + bo_proceeds) * parametres.commission
-                bo_pnl = bo_proceeds - parametres.base_order - bo_fees
+                bo_fees = (bo_cost + bo_proceeds) * parametres.commission
+                bo_pnl = bo_proceeds - bo_cost - bo_fees
                 bo_pnl_pct = ((exit_price / base_order_price) - 1) * 100.0
                 
                 individual_positions.append({
                     "type": "BO_0",
                     "entry_time": indice[entry_bar],
                     "entry_price": base_order_price,
-                    "size_usd": parametres.base_order,
+                    "size_usd": bo_cost,
                     "qty": bo_qty,
                     "exit_price": exit_price,
                     "pnl": bo_pnl,
@@ -572,6 +626,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 
                 # Reset state
                 in_trade = False
+                tp_order_live = False
                 last_close_bar = t
                 base_order_price = None
                 last_so_price = None
@@ -579,6 +634,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 total_position_size = 0.0
                 total_invested = 0.0
                 current_so_count = 0
+            else:
+                tp_order_live = True
         
         # ═══════════════════════════════════════════════════════════
         # LOGIQUE SAFETY ORDERS
@@ -611,15 +668,14 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 so_size = calcular_so_size(parametres, current_so_count)
                 
                 # Vérifier capital disponible
-                if capital_disponible < so_size:
+                so_qty, so_cost = order_fill(so_size, price)
+                if parametres.check_cash and capital_disponible < so_cost:
                     if verbose:
-                        print(f"⚠️ [{indice[t].strftime('%Y-%m-%d')}] SO SKIPPED - Capital insuffisant (${capital_disponible:.2f} < ${so_size:.2f})")
+                        print(f"⚠️ [{indice[t].strftime('%Y-%m-%d')}] SO SKIPPED - Capital insuffisant (${capital_disponible:.2f} < ${so_cost:.2f})")
                     # Continue le trade sans ajouter le SO
                 else:
-                    so_qty = so_size / price
-                    
                     # Update position
-                    total_invested += so_size
+                    total_invested += so_cost
                     total_position_size += so_qty
                     avg_entry_price = total_invested / total_position_size
                     last_so_price = price
@@ -629,12 +685,12 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     current_trade_so_list.append({
                         'time': indice[t],
                         'price': price,
-                        'size': so_size,
+                        'size': so_cost,
                         'number': current_so_count
                     })
                     
                     # Déduire du capital
-                    capital_disponible -= so_size
+                    capital_disponible -= so_cost
                     # OPTIMISATION: Utiliser array indexing au lieu de append()
                     if capital_event_idx < max_capital_events:
                         capital_history_array[capital_event_idx] = capital_disponible
@@ -684,17 +740,17 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             individual_positions = []
             
             # Base Order
-            bo_qty = parametres.base_order / base_order_price
+            bo_qty, bo_cost = order_fill(parametres.base_order, base_order_price)
             bo_proceeds = prix_final * bo_qty
-            bo_fees = (parametres.base_order + bo_proceeds) * parametres.commission
-            bo_pnl = bo_proceeds - parametres.base_order - bo_fees
+            bo_fees = (bo_cost + bo_proceeds) * parametres.commission
+            bo_pnl = bo_proceeds - bo_cost - bo_fees
             bo_pnl_pct = ((prix_final / base_order_price) - 1) * 100.0
             
             individual_positions.append({
                 "type": "BO_0",
                 "entry_time": indice[entry_bar],
                 "entry_price": base_order_price,
-                "size_usd": parametres.base_order,
+                "size_usd": bo_cost,
                 "qty": bo_qty,
                 "exit_price": prix_final,
                 "pnl": bo_pnl,
@@ -759,16 +815,16 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
 
             open_individual_positions = []
 
-            bo_qty = parametres.base_order / base_order_price
+            bo_qty, bo_cost = order_fill(parametres.base_order, base_order_price)
             bo_proceeds = prix_courant * bo_qty
-            bo_fees = (parametres.base_order + bo_proceeds) * parametres.commission
-            bo_pnl = bo_proceeds - parametres.base_order - bo_fees
+            bo_fees = (bo_cost + bo_proceeds) * parametres.commission
+            bo_pnl = bo_proceeds - bo_cost - bo_fees
             bo_pnl_pct = ((prix_courant / base_order_price) - 1) * 100.0
             open_individual_positions.append({
                 "type": "BO_0",
                 "entry_time": indice[entry_bar],
                 "entry_price": base_order_price,
-                "size_usd": parametres.base_order,
+                "size_usd": bo_cost,
                 "qty": bo_qty,
                 "current_price": prix_courant,
                 "pnl": bo_pnl,
@@ -1727,6 +1783,7 @@ def backtest_smartbot_v2_multi_portfolio_legacy(
                 
             position = positions_ouvertes[asset]
             current_price = df['Close'].iloc[idx]
+            current_open = df['Open'].iloc[idx] if 'Open' in df.columns else current_price
             indicators = asset_data['indicators']
             
             # Calculer le prix moyen d'entrée
@@ -1746,7 +1803,7 @@ def backtest_smartbot_v2_multi_portfolio_legacy(
             if market_bar_allowed and (tp_hit or sl_hit):
                 # SORTIE : priorité au SL si les 2 sont touchés sur la même bougie.
                 if sl_hit:
-                    exit_price = sl_target
+                    exit_price = current_open if current_open <= sl_target else sl_target
                     exit_reason = 'SL'
                 else:
                     exit_price = tp_target

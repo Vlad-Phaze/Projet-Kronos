@@ -182,7 +182,7 @@ def ref_portfolio(assets, p, max_active):
     names = list(assets)
     ind = {a: bx.calculer_indicateurs_smartbot(df, p) for a, df in assets.items()}
     idx = {a: {ts: i for i, ts in enumerate(df.index)} for a, df in assets.items()}
-    arrs = {a: {c: df[c].to_numpy(dtype=float) for c in ("Close", "High", "Low")} for a, df in assets.items()}
+    arrs = {a: {c: df[c].to_numpy(dtype=float) for c in ("Open", "Close", "High", "Low")} for a, df in assets.items()}
     timeline = None
     for df in assets.values():
         timeline = df.index if timeline is None else timeline.union(df.index)
@@ -209,16 +209,17 @@ def ref_portfolio(assets, p, max_active):
         if not fire:
             return
         size = bx.calcular_so_size(p, st["n"])
-        if cap < size:
+        so_qty, so_cost = bx.order_fill(size, price)
+        if cap < so_cost:
             return
-        st["inv"] += size
-        st["qty"] += size / price
+        st["inv"] += so_cost
+        st["qty"] += so_qty
         st["avg"] = st["inv"] / st["qty"]
         st["last_so"] = price
         st["n"] += 1
         st["so_t"].append(ts)
         st["so_p"].append(price)
-        cap -= size
+        cap -= so_cost
 
     def record(a, st, exit_price, ts_exit, reason, realize):
         nonlocal cap
@@ -244,21 +245,30 @@ def ref_portfolio(assets, p, max_active):
                 continue
             tp = st["avg"] * (1 + p.take_profit / 100.0) if p.tp_type == "From Average Entry" \
                 else st["base"] * (1 + p.take_profit / 100.0)
-            tp_hit = arrs[a]["High"][i] >= tp
+            touch = arrs[a]["High"][i] if st["tp_live"] else price
+            if p.price_tick > 0:
+                touch = np.floor(touch / p.price_tick + 0.5) * p.price_tick
+                tp_hit = touch + 1e-6 >= tp
+            else:
+                tp_hit = touch >= tp
             sl_price = st["avg"] * (1 - sl_eff / 100.0)
             sl_hit = sl_eff > 0 and arrs[a]["Low"][i] <= sl_price
             time_hit = p.max_trade_duration_bars > 0 and (i - st["entry_i"]) >= p.max_trade_duration_bars
             if sl_hit or tp_hit or time_hit:
                 if sl_hit:
-                    record(a, st, sl_price, ts, "SL", True)
+                    bar_open = arrs[a]["Open"][i]
+                    exit_px = bar_open if bar_open <= sl_price else sl_price
+                    record(a, st, exit_px, ts, "SL", True)
                 elif tp_hit:
                     record(a, st, tp, ts, "TP", True)
                 else:
                     record(a, st, price, ts, "TIME", True)
                 del S[a]
                 last_close_ts[a] = ts
-            elif p.strategy_mode == "dca":
-                so_check(a, i, st, price, ts)
+            else:
+                if p.strategy_mode == "dca":
+                    so_check(a, i, st, price, ts)
+                st["tp_live"] = True
         slots = max_active - len(S)
         for a in names:
             if slots <= 0 or not ok_bar:
@@ -268,12 +278,14 @@ def ref_portfolio(assets, p, max_active):
                 continue
             if not bx.evaluer_entry_signal(ind[a], i, p):
                 continue
-            if cap < p.base_order:
+            price = arrs[a]["Close"][i]
+            order_qty, order_cost = bx.order_fill(p.base_order, price)
+            if cap < order_cost:
                 skipped += 1
                 continue
-            price = arrs[a]["Close"][i]
-            cap -= p.base_order
-            S[a] = dict(base=price, avg=price, last_so=price, n=0, inv=p.base_order, qty=p.base_order / price,
+            cap -= order_cost
+            S[a] = dict(base=price, avg=price, last_so=price, n=0, inv=order_cost, qty=order_qty,
+                        tp_live=False,
                         entry_ts=ts, entry_i=i, so_t=[], so_p=[])
             lastpx[a] = price
             slots -= 1

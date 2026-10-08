@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(ROOT, "datafeed_tester"))
 from backtester_exact import ParametresDCA_SmartBotV2  # noqa: E402
 from backtester_fast import PreparedPortfolio, optimize_portfolio  # noqa: E402
 from fetch_cache import fetch_final_cached  # noqa: E402
-from fetcher import compare_exchanges_on_bases  # noqa: E402
+from fetcher import compare_exchanges_on_bases, fetch_tradingview  # noqa: E402
 
 # Espace de recherche par défaut : liste = choix discrets, (min, max) = intervalle continu / entier
 DEFAULT_SPACE = {
@@ -45,10 +45,18 @@ DEFAULT_SPACE = {
 }
 
 
-def load_assets(assets, timeframe, start, end, exchange):
+def load_assets(assets, timeframe, start, end, exchange, market="crypto", quote="USDT"):
     to_ms = lambda s: int(datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
-    exchanges = [exchange] + [e for e in ["binance", "coinbase", "kraken", "kucoin", "okx"] if e != exchange]
-    data = fetch_final_cached(compare_exchanges_on_bases, exchanges, assets, timeframe, to_ms(start), to_ms(end))
+    name = str(exchange).lower()
+    if name in ("tradingview", "tv", "tradingview-stock"):
+        kind = "stock" if name.endswith("stock") or market == "stock" else "crypto"
+        cache_exchanges = ["tradingview", kind, quote if kind == "crypto" else "USD"]
+        data = fetch_final_cached(
+            fetch_tradingview, cache_exchanges, assets, timeframe, to_ms(start), to_ms(end)
+        )
+    else:
+        exchanges = [exchange] + [e for e in ["binance", "coinbase", "kraken", "kucoin", "okx"] if e != exchange]
+        data = fetch_final_cached(compare_exchanges_on_bases, exchanges, assets, timeframe, to_ms(start), to_ms(end))
     out = {}
     for asset, df in data["__FINAL__"].items():
         df = df.copy()
@@ -70,7 +78,9 @@ def main():
     ap.add_argument("--timeframe", default="1h")
     ap.add_argument("--start", default="2023-01-01")
     ap.add_argument("--end", default="2025-01-01")
-    ap.add_argument("--exchange", default="binance")
+    ap.add_argument("--exchange", default="tradingview", help="tradingview | binance | alpaca")
+    ap.add_argument("--market", default="crypto", choices=["crypto", "stock"], help="Avec --exchange tradingview")
+    ap.add_argument("--quote", default="USDT", help="Quote crypto TradingView, ex. USDT")
     ap.add_argument("--trials", type=int, default=2000)
     ap.add_argument("--objective", default="calmar", help="calmar | return_pct | final_equity | realized_pnl")
     ap.add_argument("--max-dd", type=float, default=None, help="drawdown equity max accepté (%%)")
@@ -80,7 +90,9 @@ def main():
     ap.add_argument("--out", default="optimization_results.csv")
     args = ap.parse_args()
 
-    assets = load_assets(args.assets, args.timeframe, args.start, args.end, args.exchange)
+    assets = load_assets(
+        args.assets, args.timeframe, args.start, args.end, args.exchange, args.market, args.quote
+    )
     if not assets:
         sys.exit("Aucune donnée disponible")
     prep = PreparedPortfolio(assets)
