@@ -3,501 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kronos Capital - Backtesteur</title>
+    <title>Kronos Research</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <script src="stock_presets.js"></script>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #edeae4;
-            color: #1a1a1a;
-            min-height: 100vh;
-            padding: 0;
-            line-height: 1.6;
-            overflow-x: hidden;
-        }
-        
-        .container {
-            max-width: 100%;
-            margin: 0 auto;
-            background: #edeae4;
-            padding: 0;
-        }
-        
-        header {
-            background: #edeae4;
-            color: #1a1a1a;
-            padding: 24px 40px;
-            border-bottom: none;
-            box-shadow: none;
-        }
-        
-        h1 {
-            color: #1a1a1a;
-            margin-bottom: 8px;
-            font-size: 2em;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        
-        h1 img {
-            height: 36px;
-            width: auto;
-        }
-        
-        .subtitle {
-            color: #888888;
-            margin-bottom: 15px;
-            font-size: 0.95em;
-            font-weight: 400;
-            letter-spacing: 0;
-        }
-        
-        .nav-links {
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: none;
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-        
-        .nav-btn {
-            padding: 10px 20px;
-            border: 1px solid #ddd9d3;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: #ffffff;
-            color: #1a1a1a;
-        }
-        
-        .nav-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            border-color: #1a1a1a;
-        }
-        
-        .nav-btn.active {
-            background: #1a1a1a;
-            color: #ffffff;
-            border-color: #1a1a1a;
-        }
-
-        .preset-buttons {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            margin-bottom: 8px;
-        }
-
-        .preset-btn {
-            padding: 8px 14px;
-            border: 1px solid #ddd9d3;
-            border-radius: 8px;
-            background: #ffffff;
-            color: #1a1a1a;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .preset-btn:hover,
-        .preset-btn.active {
-            background: #1a1a1a;
-            color: #ffffff;
-            border-color: #1a1a1a;
-        }
-        
-        .sections-container {
-            display: flex;
-            flex-direction: row;
-            padding: 40px 20px;
-            background: #edeae4;
-            gap: 20px;
-        }
-        
-        .section {
-            background: #ffffff;
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            border-radius: 12px;
-            overflow: hidden;
-            border: 1px solid #ddd9d3;
-        }
-        
-        .accordion-header {
-            color: #ffffff;
-            font-size: 0.85em;
-            padding: 16px 12px;
-            font-weight: 700;
-            letter-spacing: -0.01em;
-            cursor: pointer;
-            user-select: none;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            transition: all 0.2s;
-            background: #1a1a1a;
-            text-align: center;
-            position: relative;
-        }
-        
-        .accordion-header.active {
-            background: #1a1a1a;
-            color: #ffffff;
-        }
-        
-        .accordion-icon {
-            font-size: 0.7em;
-            transition: transform 0.3s;
-            color: inherit;
-            margin-top: 3px;
-            position: absolute;
-            right: 12px;
-        }
-        
-        .accordion-header.active .accordion-icon {
-            transform: rotate(180deg);
-        }
-        
-        .accordion-content {
-            display: none;
-            background: #ffffff;
-        }
-        
-        .accordion-content.active {
-            display: block;
-            animation: slideDown 0.3s ease-out;
-        }
-        
-        @keyframes slideDown {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        .accordion-body {
-            padding: 20px 15px;
-        }
-        
-        .form-grid {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .form-group {
-            margin-bottom: 0;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 5px;
-            color: #1a1a1a;
-            font-size: 0.75em;
-            font-weight: 600;
-            letter-spacing: 0;
-        }
-        
-        .label-help {
-            color: #999;
-            font-size: 0.75em;
-            display: block;
-            margin-top: 3px;
-            font-weight: 400;
-            text-transform: none;
-            letter-spacing: 0;
-        }
-        
-        input[type="text"],
-        input[type="number"],
-        input[type="date"],
-        select,
-        textarea {
-            width: 100%;
-            padding: 8px 12px;
-            background: #f8f8f8;
-            border: none;
-            border-radius: 6px;
-            color: #1a1a1a;
-            font-size: 13px;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            transition: all 0.2s;
-        }
-        
-        textarea {
-            min-height: 80px;
-            resize: vertical;
-        }
-        
-        input:focus,
-        select:focus,
-        textarea:focus {
-            outline: none;
-            background: #f0f0f0;
-            box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.05);
-        }
-        
-        .btn {
-            padding: 14px 32px;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            letter-spacing: 0;
-            cursor: pointer;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            display: inline-block;
-            min-width: 200px;
-        }
-        
-        .button-container {
-            padding: 24px;
-            display: flex;
-            gap: 12px;
-            justify-content: center;
-            background: #edeae4;
-            border-top: none;
-        }
-        
-        .btn-primary {
-            background: #1a1a1a;
-            color: #ffffff;
-            border: 1px solid #1a1a1a;
-        }
-        
-        .btn-primary:hover {
-            background: #333;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        }
-        
-        .btn-secondary {
-            background: #ffffff;
-            color: #1a1a1a;
-            border: none;
-        }
-        
-        .btn-secondary:hover {
-            background: #f5f5f5;
-        }
-
-        .param-preset.active {
-            background: #1a1a1a;
-            color: #ffffff;
-        }
-        
-        .loading {
-            display: none;
-            color: #1a1a1a;
-            text-align: center;
-            padding: 40px;
-            font-size: 1.1em;
-            font-weight: 600;
-        }
-        
-        .loading.active {
-            display: block;
-            position: sticky;
-            bottom: 16px;
-            z-index: 30;
-            margin: 16px 24px 24px;
-            background: #ffffff;
-            border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-        }
-
-        .progress-track {
-            width: min(520px, 92%);
-            height: 10px;
-            margin: 18px auto 0;
-            background: #e4e0d8;
-            border-radius: 999px;
-            overflow: hidden;
-        }
-
-        .progress-bar {
-            height: 100%;
-            width: 0%;
-            background: #1a1a1a;
-            border-radius: 999px;
-            transition: width 0.25s ease;
-        }
-
-        .progress-bar.indeterminate {
-            width: 18%;
-            transition: none;
-            animation: progress-grow 1.6s ease-in-out infinite;
-        }
-
-        @keyframes progress-grow {
-            0% { width: 14%; }
-            50% { width: 82%; }
-            100% { width: 14%; }
-        }
-
-        .progress-detail {
-            margin: 12px 0 0;
-            font-size: 0.85em;
-            font-weight: 500;
-            color: #555;
-        }
-        
-        .results {
-            display: none;
-            margin: 0;
-            padding: 0;
-            background: #edeae4;
-            width: 100%;
-        }
-        
-        .results.active {
-            display: block;
-        }
-        
-        .results-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 24px 40px 0 40px;
-            margin-bottom: 0;
-        }
-        
-        .results-title {
-            font-size: 1.5em;
-            font-weight: 700;
-            color: #1a1a1a;
-        }
-        
-        .csv-download-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 12px 24px;
-            background: #1a1a1a;
-            color: #ffffff;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-        
-        .csv-download-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-            background: #333333;
-        }
-        
-        .csv-download-btn:active {
-            transform: translateY(0);
-        }
-        
-        .csv-download-btn svg {
-            width: 18px;
-            height: 18px;
-        }
-        
-        .stats-grid {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 16px;
-            background: #edeae4;
-            border: none;
-            margin: 0 0 20px 0;
-            padding: 24px;
-        }
-        
-        .stat-card {
-            background: #ffffff;
-            padding: 20px;
-            text-align: center;
-            border: 1px solid #ddd9d3;
-            border-radius: 8px;
-            min-width: fit-content;
-            flex: 0 1 auto;
-        }
-        
-        .stat-label {
-            color: #888888;
-            font-size: 0.75em;
-            margin-bottom: 8px;
-            font-weight: 600;
-            letter-spacing: 0;
-            text-transform: uppercase;
-        }
-        
-        .stat-value {
-            color: #1a1a1a;
-            font-size: 1.8em;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-        }
-        
-        .stat-value.positive {
-            color: #10b981;
-        }
-        
-        .stat-value.negative {
-            color: #ef4444;
-        }
-        
-        .chart-container {
-            background: #edeae4;
-            border: none;
-            padding: 20px;
-            margin: 0 auto;
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        
-        .info-box {
-            background: #f5f5f5;
-            border-left: 4px solid #000000;
-            padding: 15px;
-            margin: 15px 0;
-            font-size: 0.85em;
-            line-height: 1.6;
-        }
-    </style>
+    <link rel="stylesheet" href="kronos.css">
 </head>
-<body>
+<body class="desk">
     <div class="container">
-        <header>
-            <h1>KRONOS CAPITAL BACKTESTEUR</h1>
-            <p class="subtitle" id="strategySubtitle">Portfolio multi-actions SmartBot V2 - Strategie DCA</p>
-            <div class="nav-links">
+        <header class="desk-bar">
+            <div class="brand">
+                <div class="brand-mark">KX</div>
+                <div>
+                    <h1>KRONOS <em>RESEARCH</em></h1>
+                    <p class="subtitle" id="strategySubtitle">Portfolio multi-actions SmartBot V2 - Strategie DCA</p>
+                </div>
+            </div>
+            <div class="desk-status">
+                <span class="status-pill"><span class="live-dot"></span>PAPER</span>
+                <span class="status-pill" id="deskClock">--:--:--</span>
+            </div>
+        </header>
+        <div class="nav-links desk-nav">
                 <a href="index.html" class="nav-btn">Home</a>
                 <a href="configure_smartbot.html?strategy=dca" id="nav-crypto-single" class="nav-btn">Crypto Single</a>
                 <a href="run_multi_smartbot.html?strategy=dca" id="nav-crypto-multi" class="nav-btn">Crypto Multi</a>
@@ -505,7 +34,6 @@
                 <a href="run_multi_smartbot_stocks.html?strategy=dca" id="nav-stocks-multi" class="nav-btn active">Stocks Multi</a>
                 <a href="optimize_smartbot.html?strategy=dca" id="nav-optimizer" class="nav-btn">Optimizer</a>
             </div>
-        </header>
 
         <form id="backtestForm">
             <div class="sections-container">
@@ -758,7 +286,7 @@
 
         <div class="results" id="results">
             <div class="results-header">
-                <div class="results-title">📊 Résultats du Backtest Multi-Stocks</div>
+                <div class="results-title">Portfolio report · Equities</div>
                 <button class="csv-download-btn" id="csvDownloadBtn" onclick="downloadMultiAssetCSV()">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -814,6 +342,15 @@
         }
 
         applyStrategyModeUi();
+
+        function tickDeskClock() {
+            const clock = document.getElementById('deskClock');
+            if (!clock) return;
+            clock.textContent = new Date().toLocaleTimeString('fr-FR', { hour12: false });
+        }
+        tickDeskClock();
+        setInterval(tickDeskClock, 1000);
+
 
         function formatDateInput(dateObj) {
             const year = dateObj.getFullYear();
@@ -893,7 +430,7 @@
             safe_order: 7500,
             so_volume_scale: 1.5,
             max_so: 5,
-            initial_capital: 100000,
+            initial_capital: 250000,
             pricedevbase: 'ATR',
             price_deviation: 1.5,
             atr_length: 14,
@@ -1334,13 +871,13 @@
             });
 
             const axis = {
-                titlefont: {size: 12, color: '#000000'},
-                gridcolor: '#e0e0e0'
+                titlefont: {size: 11, color: '#8b98ab', family: 'IBM Plex Sans, sans-serif'},
+                gridcolor: 'rgba(148, 163, 184, 0.14)', zerolinecolor: 'rgba(148, 163, 184, 0.22)', tickfont: {color: '#8b98ab', family: 'IBM Plex Mono, monospace', size: 11}, linecolor: '#243041'
             };
             const baseLayout = {
-                paper_bgcolor: '#ffffff',
-                plot_bgcolor: '#ffffff',
-                hovermode: 'closest',
+                height: 310, paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                font: {family: 'IBM Plex Sans, sans-serif', color: '#c5d0de', size: 12}, hoverlabel: {bgcolor: '#0b0e14', bordercolor: '#334155', font: {family: 'IBM Plex Mono, monospace', color: '#e7edf5', size: 12}}, hovermode: 'closest',
                 margin: {l: 60, r: 24, t: 80, b: 60, pad: 10}
             };
 
@@ -1350,16 +887,16 @@
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Allocation',
-                line: {color: '#000000', width: 2, shape: 'hv'},
+                line: {color: '#7dd3fc', width: 1.6, shape: 'hv'},
                 fill: 'tozeroy',
-                fillcolor: 'rgba(0, 0, 0, 0.08)',
+                fillcolor: 'rgba(125, 211, 252, 0.14)',
                 hovertemplate: '<b>%{x}</b><br>Capital alloué: %{y:.1f}%<extra></extra>'
             }], {
                 ...baseLayout,
-                title: {text: 'Allocation du capital', font: {size: 18, color: '#000000', family: 'Arial Black'}},
+                title: {text: 'Allocation du capital', font: {size: 13, color: '#e7edf5', family: 'IBM Plex Sans, sans-serif'}},
                 xaxis: {...axis, title: 'Date'},
                 yaxis: {...axis, title: 'Capital alloué (%)', rangemode: 'tozero'}
-            }, {responsive: true});
+            }, {responsive: true, displaylogo: false});
 
             Plotly.newPlot('positions-chart', [{
                 x: days,
@@ -1367,16 +904,16 @@
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Positions',
-                line: {color: '#1f77b4', width: 2, shape: 'hv'},
+                line: {color: '#f5c16c', width: 1.6, shape: 'hv'},
                 fill: 'tozeroy',
-                fillcolor: 'rgba(31, 119, 180, 0.12)',
+                fillcolor: 'rgba(245, 193, 108, 0.14)',
                 hovertemplate: '<b>%{x}</b><br>Trades actifs: %{y}<extra></extra>'
             }], {
                 ...baseLayout,
-                title: {text: 'Trades actifs', font: {size: 18, color: '#000000', family: 'Arial Black'}},
+                title: {text: 'Trades actifs', font: {size: 13, color: '#e7edf5', family: 'IBM Plex Sans, sans-serif'}},
                 xaxis: {...axis, title: 'Date'},
                 yaxis: {...axis, title: 'Trades simultanés', rangemode: 'tozero'}
-            }, {responsive: true});
+            }, {responsive: true, displaylogo: false});
         }
 
         function displayResults(data) {
@@ -1468,9 +1005,7 @@
                     <div class="stat-value ${stats.open_trades_at_end > 0 ? 'negative' : ''}">
                         ${stats.open_trades_at_end || 0}
                     </div>
-                    <div style="font-size: 0.82em; color: #666; margin-top: 6px; line-height: 1.4;">
-                        ${openTradeAssetsText}
-                    </div>
+                    <div class="stat-note">${openTradeAssetsText}</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Total Days</div>
@@ -1505,8 +1040,8 @@
             let equityHTML = '';
             if (data.combined_equity && data.combined_equity.length > 0) {
                 equityHTML = `
-                    <div style="background: #ffffff; padding: 20px; border-radius: 12px; margin: 0 0 20px 0;">
-                        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 24px;">
+                    <div class="chart-panel">
+                        <div class="chart-grid">
                             <div id="equity-chart"></div>
                             <div id="drawdown-chart"></div>
                             <div id="allocation-chart"></div>
@@ -1517,8 +1052,8 @@
             }
             
             // 2. Display per-asset breakdown (SECOND)
-            let perAssetHTML = '<div style="padding: 20px; background: #edeae4;"><h3 style="margin-bottom: 20px; font-size: 1.2em; color: #1a1a1a;">Per-Asset Performance</h3>';
-            perAssetHTML += '<div style="display: grid; gap: 15px;">';
+            let perAssetHTML = '<div class="book"><h3>Per-asset book</h3>';
+            perAssetHTML += '<div class="book-list">';
             
             Object.entries(perAsset).forEach(([asset, astats]) => {
                 const chartId = `price-chart-${asset}`;
@@ -1539,29 +1074,27 @@
                 const assetAvgSo = assetDeals > 0 ? (assetSoPlaced / assetDeals) : 0;
                 
                 const soBreakdownHtml = strategyMode === 'dca' ? `
-                                <div><strong>SO Placed:</strong> ${assetSoPlaced}</div>
-                                <div><strong>Avg SO/Deal:</strong> ${assetAvgSo.toFixed(1)}</div>
+                            <span>SO placed<b>${assetSoPlaced}</b></span>
+                            <span>Avg SO<b>${assetAvgSo.toFixed(1)}</b></span>
                 ` : '';
 
                 perAssetHTML += `
-                    <div style="background: #f5f5f5; border-left: 4px solid ${assetPnl >= 0 ? '#000000' : '#999999'}">
-                        <div style="padding: 15px; cursor: pointer; user-select: none;" onclick="toggleChart('${chartId}', 'arrow-${asset}')">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <div style="font-weight: 700; font-size: 1.1em;">${asset}</div>
-                                <span id="arrow-${asset}" style="font-size: 1.2em; transition: transform 0.3s;">▼</span>
-                            </div>
-                            <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.9em; margin-top: 10px;">
-                                <div><strong>Trades:</strong> ${assetDeals}</div>
-                                <div><strong>Positions:</strong> ${assetPositions}</div>
-                                <div title="Méthode TradingView: chaque position (BO, SO1, SO2...) compte séparément"><strong>Win Rate (TV):</strong> ${assetWinRate.toFixed(1)}%</div>
-                                <div><strong>PnL:</strong> $${assetPnl.toFixed(2)}</div>
-                                ${soBreakdownHtml}
-                                ${astats.open_trades && astats.open_trades.length > 0 ? `<div style="color: #999;"><strong>Open at End:</strong> ${astats.open_trades.length}</div>` : ''}
-                            </div>
+                    <div class="asset-card ${assetPnl >= 0 ? 'up' : 'down'}">
+                        <div class="asset-head" onclick="toggleChart('${chartId}', 'arrow-${asset}')">
+                            <div class="asset-ticker">${asset}</div>
+                            <span class="asset-arrow" id="arrow-${asset}">▾</span>
                         </div>
-                        <div id="${chartId}" style="display: none; padding: 15px; background: white; border-top: 1px solid #ddd;">
-                            <div id="${chartId}-container" style="width: 98%; margin: 0 auto 20px auto;"></div>
-                            <div id="${tableId}" style="width: 100%;"></div>
+                        <div class="asset-metrics">
+                            <span>Trades<b>${assetDeals}</b></span>
+                            <span>Legs<b>${assetPositions}</b></span>
+                            <span title="Chaque jambe BO et SO compte séparément">Win rate<b>${assetWinRate.toFixed(1)}%</b></span>
+                            <span>PnL<b class="${assetPnl >= 0 ? 'up' : 'down'}">$${assetPnl.toFixed(2)}</b></span>
+                            ${soBreakdownHtml}
+                            ${astats.open_trades && astats.open_trades.length > 0 ? `<span>Open<b>${astats.open_trades.length}</b></span>` : ''}
+                        </div>
+                        <div id="${chartId}" class="asset-detail" style="display: none;">
+                            <div id="${chartId}-container"></div>
+                            <div id="${tableId}"></div>
                         </div>
                     </div>
                 `;
@@ -1662,9 +1195,9 @@
                     type: 'scatter',
                     mode: 'lines',
                     name: 'Portfolio Equity',
-                    line: {color: '#000000', width: 2},
+                    line: {color: '#d6ff4a', width: 1.7},
                     fill: 'tozeroy',
-                    fillcolor: 'rgba(0, 0, 0, 0.1)',
+                    fillcolor: 'rgba(214, 255, 74, 0.06)',
                     customdata: openTradesHoverData,
                     hovertemplate: '<b>%{x}</b><br>Equity: $%{y:,.2f}<br>Open Trades: %{customdata[0]}<br>Assets: %{customdata[1]}<extra></extra>'
                 };
@@ -1672,22 +1205,22 @@
                 const layout = {
                     title: {
                         text: 'Portfolio Equity Curve',
-                        font: {size: 18, color: '#000000', family: 'Arial Black'}
+                        font: {size: 13, color: '#e7edf5', family: 'IBM Plex Sans, sans-serif'}
                     },
                     xaxis: {
                         title: 'Date',
-                        titlefont: {size: 12, color: '#000000'},
-                        gridcolor: '#e0e0e0'
+                        titlefont: {size: 11, color: '#8b98ab', family: 'IBM Plex Sans, sans-serif'},
+                        gridcolor: 'rgba(148, 163, 184, 0.14)', zerolinecolor: 'rgba(148, 163, 184, 0.22)', tickfont: {color: '#8b98ab', family: 'IBM Plex Mono, monospace', size: 11}, linecolor: '#243041'
                     },
                     yaxis: {
                         title: 'Equity ($)',
-                        titlefont: {size: 12, color: '#000000'},
-                        gridcolor: '#e0e0e0',
+                        titlefont: {size: 11, color: '#8b98ab', family: 'IBM Plex Sans, sans-serif'},
+                        gridcolor: 'rgba(148, 163, 184, 0.14)', zerolinecolor: 'rgba(148, 163, 184, 0.22)', tickfont: {color: '#8b98ab', family: 'IBM Plex Mono, monospace', size: 11}, linecolor: '#243041',
                         range: yRange
                     },
-                    paper_bgcolor: '#ffffff',
-                    plot_bgcolor: '#ffffff',
-                    hovermode: 'closest',
+                    height: 310, paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    font: {family: 'IBM Plex Sans, sans-serif', color: '#c5d0de', size: 12}, hoverlabel: {bgcolor: '#0b0e14', bordercolor: '#334155', font: {family: 'IBM Plex Mono, monospace', color: '#e7edf5', size: 12}}, hovermode: 'closest',
                     margin: {
                         l: 60,
                         r: 60,
@@ -1702,14 +1235,14 @@
                         y0: initialCapital,
                         y1: initialCapital,
                         line: {
-                            color: 'rgba(128, 128, 128, 0.5)',
+                            color: 'rgba(214, 255, 74, 0.45)',
                             width: 1,
                             dash: 'dash'
                         }
                     }]
                 };
                 
-                Plotly.newPlot('equity-chart', [trace], layout, {responsive: true});
+                Plotly.newPlot('equity-chart', [trace], layout, {responsive: true, displaylogo: false});
                 
                 // Calculate and render drawdown chart
                 const drawdowns = [];
@@ -1728,30 +1261,30 @@
                     type: 'scatter',
                     mode: 'lines',
                     name: 'Drawdown',
-                    line: {color: '#ef4444', width: 2},
+                    line: {color: '#ff5d73', width: 1.6},
                     fill: 'tozeroy',
-                    fillcolor: 'rgba(239, 68, 68, 0.1)',
+                    fillcolor: 'rgba(255, 93, 115, 0.16)',
                     hovertemplate: '<b>%{x}</b><br>Drawdown: %{y:.2f}%<extra></extra>'
                 };
                 
                 const drawdownLayout = {
                     title: {
                         text: 'Portfolio Drawdown',
-                        font: {size: 18, color: '#000000', family: 'Arial Black'}
+                        font: {size: 13, color: '#e7edf5', family: 'IBM Plex Sans, sans-serif'}
                     },
                     xaxis: {
                         title: 'Date',
-                        titlefont: {size: 12, color: '#000000'},
-                        gridcolor: '#e0e0e0'
+                        titlefont: {size: 11, color: '#8b98ab', family: 'IBM Plex Sans, sans-serif'},
+                        gridcolor: 'rgba(148, 163, 184, 0.14)', zerolinecolor: 'rgba(148, 163, 184, 0.22)', tickfont: {color: '#8b98ab', family: 'IBM Plex Mono, monospace', size: 11}, linecolor: '#243041'
                     },
                     yaxis: {
                         title: 'Drawdown (%)',
-                        titlefont: {size: 12, color: '#000000'},
-                        gridcolor: '#e0e0e0'
+                        titlefont: {size: 11, color: '#8b98ab', family: 'IBM Plex Sans, sans-serif'},
+                        gridcolor: 'rgba(148, 163, 184, 0.14)', zerolinecolor: 'rgba(148, 163, 184, 0.22)', tickfont: {color: '#8b98ab', family: 'IBM Plex Mono, monospace', size: 11}, linecolor: '#243041'
                     },
-                    paper_bgcolor: '#ffffff',
-                    plot_bgcolor: '#ffffff',
-                    hovermode: 'closest',
+                    height: 310, paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    font: {family: 'IBM Plex Sans, sans-serif', color: '#c5d0de', size: 12}, hoverlabel: {bgcolor: '#0b0e14', bordercolor: '#334155', font: {family: 'IBM Plex Mono, monospace', color: '#e7edf5', size: 12}}, hovermode: 'closest',
                     margin: {
                         l: 60,
                         r: 60,
@@ -1761,7 +1294,7 @@
                     }
                 };
                 
-                Plotly.newPlot('drawdown-chart', [drawdownTrace], drawdownLayout, {responsive: true});
+                Plotly.newPlot('drawdown-chart', [drawdownTrace], drawdownLayout, {responsive: true, displaylogo: false});
                 renderDailyPortfolioCharts(dates, equity, allPositions);
             }
 
@@ -1780,14 +1313,12 @@
             if (!tableContainer || !positions || positions.length === 0) return;
             
             let html = `
-                <div style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 4px; overflow: hidden; margin-top: 20px;">
-                    <div style="background: #000000; color: #ffffff; padding: 12px; font-weight: bold; font-size: 14px;">
-                        Détail des Positions ${asset} (Style TradingView)
-                    </div>
+                <div class="blotter-wrap">
+                    <div class="blotter-head">Position blotter · ${asset}</div>
                     <div style="overflow-x: auto;">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                        <table class="blotter">
                             <thead>
-                                <tr style="background: #f5f5f5; border-bottom: 2px solid #000000;">
+                                <tr>
                                     <th style="padding: 10px 8px; text-align: left; font-weight: 600;">Type</th>
                                     <th style="padding: 10px 8px; text-align: left; font-weight: 600;">Entry Date</th>
                                     <th style="padding: 10px 8px; text-align: left; font-weight: 600;">Exit Date</th>
@@ -1814,12 +1345,11 @@
                 const isWin = pos.is_win || pnl > 0;
                 const statusColor = isOpen ? '#1f77b4' : (isWin ? '#10b981' : '#ef4444');
                 const statusText = isOpen ? 'OPEN' : (isWin ? 'WIN' : 'LOSS');
-                const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
-                const entryTime = pos.entry_time || '-';
+                                const entryTime = pos.entry_time || '-';
                 const exitTime = isOpen ? 'En cours' : (pos.exit_time || '-');
                 
                 html += `
-                    <tr style="background: ${rowBg}; border-bottom: 1px solid #e0e0e0;">
+                    <tr>
                         <td style="padding: 10px 8px; font-weight: 500;">${pos.type}</td>
                         <td style="padding: 10px 8px; font-family: monospace; font-size: 11px;">${entryTime}</td>
                         <td style="padding: 10px 8px; font-family: monospace; font-size: 11px;">${exitTime}</td>
@@ -1846,7 +1376,7 @@
                             </tbody>
                         </table>
                     </div>
-                    <div style="padding: 10px; background: #f9f9f9; font-size: 11px; color: #666; border-top: 1px solid #e0e0e0;">
+                    <div class="blotter-foot">
                         <strong>Total Positions:</strong> ${positions.length} | 
                         <strong>WIN:</strong> ${positions.filter(p => p.is_win).length} | 
                         <strong>LOSS:</strong> ${positions.filter(p => !p.is_win).length} | 
@@ -1860,13 +1390,54 @@
 
         let pendingAssetCharts = {};
 
+
+        function paintQuantLayout(layout) {
+            const next = Object.assign({}, layout || {});
+            next.paper_bgcolor = 'rgba(0,0,0,0)';
+            next.plot_bgcolor = 'rgba(0,0,0,0)';
+            next.height = next.height || 420;
+            next.font = {family: 'IBM Plex Sans, sans-serif', color: '#c5d0de', size: 12};
+            next.hoverlabel = {bgcolor: '#0b0e14', bordercolor: '#334155', font: {family: 'IBM Plex Mono, monospace', color: '#e7edf5', size: 12}};
+            if (next.title) {
+                const title = Object.assign({}, next.title);
+                title.font = {size: 13, color: '#e7edf5', family: 'IBM Plex Sans, sans-serif'};
+                next.title = title;
+            }
+            ['xaxis', 'yaxis'].forEach((key) => {
+                if (!next[key]) return;
+                const axis = Object.assign({}, next[key]);
+                axis.gridcolor = 'rgba(148, 163, 184, 0.14)';
+                axis.zerolinecolor = 'rgba(148, 163, 184, 0.22)';
+                axis.linecolor = '#243041';
+                axis.tickfont = {color: '#8b98ab', family: 'IBM Plex Mono, monospace', size: 11};
+                if (axis.titlefont) axis.titlefont = Object.assign({}, axis.titlefont, {color: '#8b98ab'});
+                next[key] = axis;
+            });
+            next.legend = Object.assign({font: {color: '#c5d0de', size: 11}, bgcolor: 'rgba(0,0,0,0)'}, next.legend || {});
+            return next;
+        }
+
         function ensureAssetChart(asset) {
             const pending = pendingAssetCharts[asset];
             if (!pending || pending.drawn) return;
             pending.drawn = true;
             const chartContainerId = `price-chart-${asset}-container`;
             if (pending.chartData && document.getElementById(chartContainerId)) {
-                Plotly.newPlot(chartContainerId, pending.chartData.data, pending.chartData.layout, {responsive: true});
+                const traces = (pending.chartData.data || []).map((trace) => {
+                    const copy = Object.assign({}, trace);
+                    if (copy.type === 'candlestick') {
+                        copy.increasing = {line: {color: '#3ee0a0'}, fillcolor: '#3ee0a0'};
+                        copy.decreasing = {line: {color: '#ff5d73'}, fillcolor: '#ff5d73'};
+                    }
+                    if (copy.marker && (copy.marker.color === '#000000' || copy.marker.color === 'black')) {
+                        copy.marker = Object.assign({}, copy.marker, {color: '#d6ff4a'});
+                    }
+                    if (copy.line && (copy.line.color === '#000000' || copy.line.color === 'black')) {
+                        copy.line = Object.assign({}, copy.line, {color: '#d6ff4a'});
+                    }
+                    return copy;
+                });
+                Plotly.newPlot(chartContainerId, traces, paintQuantLayout(pending.chartData.layout), {responsive: true, displaylogo: false});
             }
             if (pending.positions) {
                 displayTradingViewTableForAsset(`trades-table-${asset}`, pending.positions, asset);

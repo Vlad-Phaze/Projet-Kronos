@@ -3,180 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kronos Capital - Backtesteur</title>
+    <title>Kronos Research</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #edeae4;
-            color: #1a1a1a;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 40px 20px;
-            line-height: 1.6;
-        }
-        
-        .container {
-            max-width: 1200px;
-            width: 100%;
-            text-align: center;
-        }
-        
-        /* Header */
-        .logo-section {
-            margin-bottom: 80px;
-        }
-        
-        .logo-section h1 {
-            color: #1a1a1a;
-            font-size: 2.8em;
-            font-weight: 700;
-            margin-bottom: 12px;
-            letter-spacing: -0.02em;
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            justify-content: center;
-        }
-        
-        .logo-section h1 img {
-            height: 48px;
-            width: auto;
-        }
-        
-        .logo-section .tagline {
-            color: #888888;
-            font-size: 1.05em;
-            font-weight: 400;
-            margin-top: 8px;
-        }
-        
-        /* Navigation Buttons */
-        .nav-buttons {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 20px;
-            margin-top: 40px;
-            max-width: 1200px;
-            margin-left: auto;
-            margin-right: auto;
-        }
-
-        .strategy-toggle {
-            display: flex;
-            justify-content: center;
-            gap: 12px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-
-        .strategy-btn {
-            padding: 12px 20px;
-            border: 1px solid #1a1a1a;
-            border-radius: 999px;
-            background: #ffffff;
-            color: #1a1a1a;
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .strategy-btn.active {
-            background: #1a1a1a;
-            color: #ffffff;
-        }
-        
-        .nav-btn {
-            padding: 32px 24px;
-            border: 1px solid #ddd9d3;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            text-decoration: none;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 14px;
-            background: #ffffff;
-            color: #1a1a1a;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .nav-btn::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(135deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.04) 100%);
-            opacity: 0;
-            transition: opacity 0.25s ease;
-        }
-        
-        .nav-btn:hover::before {
-            opacity: 1;
-        }
-        
-        .nav-btn:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
-            border-color: #1a1a1a;
-        }
-        
-        .nav-btn:active {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-        }
-        
-        .nav-btn .label {
-            font-size: 1em;
-            position: relative;
-            z-index: 1;
-            letter-spacing: -0.01em;
-        }
-        
-        .nav-btn .description {
-            font-size: 0.85em;
-            color: #888888;
-            font-weight: 400;
-            position: relative;
-            z-index: 1;
-        }
-        
-        /* Footer */
-        footer {
-            position: fixed;
-            bottom: 30px;
-            text-align: center;
-            color: #999;
-            font-size: 0.85em;
-            font-weight: 400;
-        }
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="kronos.css">
 </head>
-<body>
+<body class="desk">
     <div class="container">
         <!-- Header -->
-        <div class="logo-section">
-            <h1>KRONOS CAPITAL BACKTESTEUR</h1>
-            <p class="tagline">Plateforme de backtesting professionnelle SmartBot V2</p>
-        </div>
+        <header class="desk-bar">
+            <div class="brand">
+                <div class="brand-mark">KX</div>
+                <div>
+                    <h1>KRONOS <em>RESEARCH</em></h1>
+                    <p class="subtitle">Portfolio research desk</p>
+                </div>
+            </div>
+            <div class="desk-status">
+                <span class="status-pill"><span class="live-dot"></span>PAPER</span>
+                <span class="status-pill" id="deskClock">--:--:--</span>
+            </div>
+        </header>
+        <main class="home">
+            <p class="home-lead">Select a desk</p>
         
         <!-- Navigation Buttons -->
         <div class="strategy-toggle">
@@ -184,33 +34,31 @@
             <button type="button" class="strategy-btn" id="btn-stop-loss" onclick="setStrategy('stop_loss')">Strategie Stop loss</button>
         </div>
 
-        <div class="nav-buttons">
-            <a href="configure_smartbot.html?strategy=dca" class="nav-btn strategy-link" data-base="configure_smartbot.html">
+        <div class="launch-grid">
+            <a href="configure_smartbot.html?strategy=dca" class="launch-card strategy-link" data-base="configure_smartbot.html">
                 <span class="label">Crypto Single</span>
                 <span class="description">Configuration individuelle</span>
             </a>
-            <a href="run_multi_smartbot.html?strategy=dca" class="nav-btn strategy-link" data-base="run_multi_smartbot.html">
+            <a href="run_multi_smartbot.html?strategy=dca" class="launch-card strategy-link" data-base="run_multi_smartbot.html">
                 <span class="label">Crypto Multi</span>
                 <span class="description">Portfolio multi-actifs</span>
             </a>
-            <a href="configure_smartbot_stocks.html?strategy=dca" class="nav-btn strategy-link" data-base="configure_smartbot_stocks.html">
+            <a href="configure_smartbot_stocks.html?strategy=dca" class="launch-card strategy-link" data-base="configure_smartbot_stocks.html">
                 <span class="label">Stock Single</span>
                 <span class="description">Actions individuelles</span>
             </a>
-            <a href="run_multi_smartbot_stocks.html?strategy=dca" class="nav-btn strategy-link" data-base="run_multi_smartbot_stocks.html">
+            <a href="run_multi_smartbot_stocks.html?strategy=dca" class="launch-card strategy-link" data-base="run_multi_smartbot_stocks.html">
                 <span class="label">Stocks Multi</span>
                 <span class="description">Portfolio d'actions</span>
             </a>
-            <a href="optimize_smartbot.html?strategy=dca" class="nav-btn strategy-link" data-base="optimize_smartbot.html">
+            <a href="optimize_smartbot.html?strategy=dca" class="launch-card strategy-link" data-base="optimize_smartbot.html">
                 <span class="label">Optimizer</span>
                 <span class="description">Test de grilles parametres</span>
             </a>
         </div>
+        </main>
     </div>
-    
-    <footer>
-        <p>© 2026 Kronos Capital – Backtesting professionnel</p>
-    </footer>
+    <footer class="desk-footer">Kronos Research · paper backtests</footer>
 
     <script>
         let selectedStrategy = 'dca';
@@ -228,6 +76,15 @@
         }
 
         setStrategy('dca');
+
+        function tickDeskClock() {
+            const clock = document.getElementById('deskClock');
+            if (!clock) return;
+            clock.textContent = new Date().toLocaleTimeString('fr-FR', { hour12: false });
+        }
+        tickDeskClock();
+        setInterval(tickDeskClock, 1000);
+
     </script>
 </body>
 </html>

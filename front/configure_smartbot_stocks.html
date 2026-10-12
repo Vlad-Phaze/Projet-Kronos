@@ -7,482 +7,29 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Kronos Capital - Backtesteur</title>
+    <title>Kronos Research</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #edeae4;
-            color: #1a1a1a;
-            min-height: 100vh;
-            padding: 0;
-            line-height: 1.6;
-            overflow-x: hidden;
-        }
-        
-        .container {
-            max-width: 100%;
-            margin: 0 auto;
-            background: #edeae4;
-            padding: 0;
-        }
-        
-        header {
-            background: #edeae4;
-            color: #1a1a1a;
-            padding: 24px 40px;
-            border-bottom: none;
-            box-shadow: none;
-        }
-
-        h1 {
-            color: #1a1a1a;
-            margin-bottom: 8px;
-            font-size: 2em;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        
-        h1 img {
-            height: 36px;
-            width: auto;
-        }
-        
-        .subtitle {
-            color: #888888;
-            margin-bottom: 15px;
-            font-size: 0.95em;
-            font-weight: 400;
-            letter-spacing: 0;
-        }
-        
-        .nav-links {
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: none;
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-        
-        .nav-btn {
-            padding: 10px 20px;
-            border: 1px solid #ddd9d3;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: #ffffff;
-            color: #1a1a1a;
-        }
-        
-        .nav-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            border-color: #1a1a1a;
-        }
-        
-        .nav-btn.active {
-            background: #1a1a1a;
-            color: #ffffff;
-            border-color: #1a1a1a;
-        }
-        
-        .sections-container {
-            display: flex;
-            flex-direction: row;
-            padding: 40px 20px;
-            background: #edeae4;
-            gap: 20px;
-        }
-        
-        .section {
-            background: #ffffff;
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            border-radius: 12px;
-            overflow: hidden;
-            border: 1px solid #ddd9d3;
-        }
-        
-        .accordion-header {
-            color: #ffffff;
-            font-size: 0.85em;
-            padding: 16px 12px;
-            font-weight: 700;
-            letter-spacing: -0.01em;
-            cursor: pointer;
-            user-select: none;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            transition: all 0.2s;
-            background: #1a1a1a;
-            text-align: center;
-            position: relative;
-        }
-        
-        .accordion-header.active {
-            background: #1a1a1a;
-            color: #ffffff;
-        }
-        
-        .accordion-icon {
-            font-size: 0.7em;
-            transition: transform 0.3s;
-            color: inherit;
-            margin-top: 3px;
-            position: absolute;
-            right: 12px;
-        }
-        
-        .accordion-header.active .accordion-icon {
-            transform: rotate(180deg);
-        }
-        
-        .accordion-content {
-            display: none;
-            background: #ffffff;
-        }
-        
-        .accordion-content.active {
-            display: block;
-            animation: slideDown 0.3s ease-out;
-        }
-        
-        @keyframes slideDown {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        .accordion-body {
-            padding: 20px 15px;
-        }
-        
-        .form-grid {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .form-group {
-            margin-bottom: 0;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 5px;
-            color: #1a1a1a;
-            font-size: 0.75em;
-            font-weight: 600;
-            letter-spacing: 0;
-        }
-        
-        .label-help {
-            color: #999;
-            font-size: 0.75em;
-            display: block;
-            margin-top: 3px;
-            font-weight: 400;
-            text-transform: none;
-            letter-spacing: 0;
-        }
-        
-        input[type="text"],
-        input[type="number"],
-        input[type="date"],
-        select {
-            width: 100%;
-            padding: 8px 12px;
-            background: #f8f8f8;
-            border: none;
-            border-radius: 6px;
-            color: #1a1a1a;
-            font-size: 13px;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            transition: all 0.2s;
-        }
-        
-        input:focus,
-        select:focus {
-            outline: none;
-            background: #f0f0f0;
-            box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.05);
-        }
-        
-        .btn {
-            padding: 14px 32px;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            letter-spacing: 0;
-            cursor: pointer;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            display: inline-block;
-            min-width: 200px;
-        }
-        
-        .button-container {
-            padding: 24px;
-            display: flex;
-            gap: 12px;
-            justify-content: center;
-            background: #edeae4;
-            border-top: none;
-        }
-        
-        .btn-primary {
-            background: #1a1a1a;
-            color: #ffffff;
-            border: 1px solid #1a1a1a;
-        }
-        
-        .btn-primary:hover {
-            background: #333;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        }
-        
-        .btn-secondary {
-            background: #ffffff;
-            color: #1a1a1a;
-            border: none;
-        }
-        
-        .btn-secondary:hover {
-            background: #f5f5f5;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-        }
-        
-        .info-box {
-            background: #f8f9fa;
-            border-left: 4px solid #1a1a1a;
-            padding: 20px;
-            margin: 20px 40px;
-            color: #888888;
-            font-size: 0.9em;
-            line-height: 1.7;
-            border-radius: 0 8px 8px 0;
-        }
-        
-        .info-box strong {
-            color: #1a1a1a;
-            font-weight: 700;
-        }
-        
-        .loading {
-            display: none;
-            color: #1a1a1a;
-            text-align: center;
-            padding: 60px 40px;
-            font-size: 1.1em;
-            font-weight: 600;
-        }
-        
-        .loading.active {
-            display: block;
-        }
-        
-        .results {
-            display: none;
-            margin: 0;
-            padding: 0;
-            background: #edeae4;
-            width: 100%;
-        }
-        
-        .results.active {
-            display: block;
-        }
-        
-        .results-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 24px 40px 0 40px;
-            margin-bottom: 0;
-        }
-        
-        .results-title {
-            font-size: 1.5em;
-            font-weight: 700;
-            color: #1a1a1a;
-        }
-        
-        .csv-download-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 12px 24px;
-            background: #1a1a1a;
-            color: #ffffff;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-        
-        .csv-download-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-            background: #333333;
-        }
-        
-        .csv-download-btn:active {
-            transform: translateY(0);
-        }
-        
-        .csv-download-btn svg {
-            width: 18px;
-            height: 18px;
-        }
-        
-        .stats-grid {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 16px;
-            background: #edeae4;
-            border: none;
-            margin: 0 0 30px 0;
-            padding: 24px;
-        }
-        
-        .stat-card {
-            background: #ffffff;
-            padding: 24px;
-            text-align: center;
-            border: 1px solid #ddd9d3;
-            border-radius: 8px;
-            min-width: fit-content;
-            flex: 0 1 auto;
-        }
-        
-        .stat-label {
-            color: #888888;
-            font-size: 0.75em;
-            margin-bottom: 8px;
-            font-weight: 600;
-            letter-spacing: 0;
-            text-transform: uppercase;
-        }
-        
-        .stat-value {
-            color: #1a1a1a;
-            font-size: 1.8em;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-        }
-        
-        .stat-value.positive {
-            color: #10b981;
-        }
-        
-        .stat-value.negative {
-            color: #ef4444;
-        }
-        
-        .chart-container {
-            background: #edeae4;
-            border: none;
-            padding: 0;
-            margin: 0 auto;
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }
-        
-         .chart-container h3 {
-            color: #1a1a1a;
-            font-weight: 700;
-            margin-bottom: 20px;
-            letter-spacing: 0;
-            font-size: 0.9em;
-            border-bottom: none;
-            padding-bottom: 10px;
-        }
-        
-        .chart-container img {
-            max-width: 100%;
-            border: none;
-        }
-        
-        .chart-container div {
-            margin-top: 0;
-            padding: 0;
-            background: transparent;
-            border-left: none;
-            font-size: 0.85em;
-            line-height: 1.8;
-            color: #1a1a1a;
-        }
-        
-        .preset-buttons {
-            display: flex;
-            gap: 1px;
-            background: #ddd9d3;
-            border: 1px solid #ddd9d3;
-        }
-        
-        .preset-btn {
-            flex: 1;
-            padding: 12px 20px;
-            background: #ffffff;
-            border: 1px solid #d0d0d0;
-            color: #1a1a1a;
-            cursor: pointer;
-            font-size: 0.85em;
-            font-weight: 600;
-            letter-spacing: 0;
-            transition: all 0.2s;
-            border-radius: 6px;
-        }
-        
-        .preset-btn:hover {
-            background: #1a1a1a;
-            color: #ffffff;
-            border-color: #1a1a1a;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-    </style>
+    <link rel="stylesheet" href="kronos.css">
 </head>
-<body>
+<body class="desk">
     <div class="container">
-        <header>
-            <h1>KRONOS CAPITAL BACKTESTEUR</h1>
-            <p class="subtitle" id="strategySubtitle">Configuration avancee SmartBot V2 - Strategie DCA (Stocks US)</p>
-            <div class="nav-links">
+        <header class="desk-bar">
+            <div class="brand">
+                <div class="brand-mark">KX</div>
+                <div>
+                    <h1>KRONOS <em>RESEARCH</em></h1>
+                    <p class="subtitle" id="strategySubtitle">Configuration avancee SmartBot V2 - Strategie DCA (Stocks US)</p>
+                </div>
+            </div>
+            <div class="desk-status">
+                <span class="status-pill"><span class="live-dot"></span>PAPER</span>
+                <span class="status-pill" id="deskClock">--:--:--</span>
+            </div>
+        </header>
+        <div class="nav-links desk-nav">
                 <a href="index.html" class="nav-btn">Home</a>
                 <a href="configure_smartbot.html?strategy=dca" id="nav-crypto-single" class="nav-btn">Crypto Single</a>
                 <a href="run_multi_smartbot.html?strategy=dca" id="nav-crypto-multi" class="nav-btn">Crypto Multi</a>
@@ -490,7 +37,6 @@
                 <a href="run_multi_smartbot_stocks.html?strategy=dca" id="nav-stocks-multi" class="nav-btn">Stocks Multi</a>
                 <a href="optimize_smartbot.html?strategy=dca" id="nav-optimizer" class="nav-btn">Optimizer</a>
             </div>
-        </header>
 
         <form id="backtestForm">
             <div class="sections-container">
@@ -711,7 +257,7 @@
 
         <div class="results" id="results">
             <div class="results-header">
-                <div class="results-title">📊 Résultats du Backtest</div>
+                <div class="results-title">Backtest report</div>
                 <button class="csv-download-btn" id="csvDownloadBtn" onclick="downloadCSV()">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -767,6 +313,15 @@
         }
 
         applyStrategyModeUi();
+
+        function tickDeskClock() {
+            const clock = document.getElementById('deskClock');
+            if (!clock) return;
+            clock.textContent = new Date().toLocaleTimeString('fr-FR', { hour12: false });
+        }
+        tickDeskClock();
+        setInterval(tickDeskClock, 1000);
+
 
         function formatDateInput(dateObj) {
             const year = dateObj.getFullYear();
@@ -1184,15 +739,10 @@
                 
                 // 1. Créer le conteneur des graphiques (flex, côte à côte) dans une carte avec bords arrondis
                 const chartsCard = document.createElement('div');
-                chartsCard.style.background = '#ffffff';
-                chartsCard.style.borderRadius = '12px';
-                chartsCard.style.padding = '20px';
-                chartsCard.style.maxWidth = '1800px';
-                chartsCard.style.margin = '0 auto 20px auto';
+                chartsCard.className = 'chart-panel';
                 
                 const chartsRow = document.createElement('div');
-                chartsRow.style.display = 'flex';
-                chartsRow.style.gap = '20px';
+                chartsRow.className = 'chart-grid';
                 
                 // Créer div pour equity chart
                 const equityDiv = document.createElement('div');
@@ -1208,7 +758,7 @@
                 
                 // Ligne 2 : Price chart en pleine largeur
                 const priceRow = document.createElement('div');
-                priceRow.style.marginTop = '20px';
+                priceRow.className = 'price-row';
                 const priceDiv = document.createElement('div');
                 priceDiv.id = 'price-chart';
                 priceDiv.style.width = '100%';
@@ -1288,9 +838,9 @@
                     type: 'scatter',
                     mode: 'lines',
                     name: 'Equity',
-                    line: {color: '#000000', width: 2},
+                    line: {color: '#d6ff4a', width: 1.7},
                     fill: 'tozeroy',
-                    fillcolor: 'rgba(0, 0, 0, 0.1)',
+                    fillcolor: 'rgba(214, 255, 74, 0.06)',
                     text: customHoverText,
                     hovertemplate: '<b>Date:</b> %{x}<br><b>Equity:</b> $%{y:.2f}<br><b>%{text}</b><extra></extra>'
                 };
@@ -1313,22 +863,22 @@
                 const equityLayout = {
                     title: {
                         text: 'Equity Curve - SmartBot V2 (US Stocks)',
-                        font: {size: 18, color: '#000000', family: 'Arial Black'}
+                        font: {size: 13, color: '#e7edf5', family: 'IBM Plex Sans, sans-serif'}
                     },
                     xaxis: {
                         title: 'Date',
-                        titlefont: {size: 12, color: '#000000'},
-                        gridcolor: '#e0e0e0'
+                        titlefont: {size: 11, color: '#8b98ab', family: 'IBM Plex Sans, sans-serif'},
+                        gridcolor: 'rgba(148, 163, 184, 0.14)', zerolinecolor: 'rgba(148, 163, 184, 0.22)', tickfont: {color: '#8b98ab', family: 'IBM Plex Mono, monospace', size: 11}, linecolor: '#243041'
                     },
                     yaxis: {
                         title: 'Equity ($)',
-                        titlefont: {size: 12, color: '#000000'},
-                        gridcolor: '#e0e0e0',
+                        titlefont: {size: 11, color: '#8b98ab', family: 'IBM Plex Sans, sans-serif'},
+                        gridcolor: 'rgba(148, 163, 184, 0.14)', zerolinecolor: 'rgba(148, 163, 184, 0.22)', tickfont: {color: '#8b98ab', family: 'IBM Plex Mono, monospace', size: 11}, linecolor: '#243041',
                         range: yRange
                     },
-                    paper_bgcolor: '#ffffff',
-                    plot_bgcolor: '#ffffff',
-                    hovermode: 'x unified',
+                    height: 310, paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    font: {family: 'IBM Plex Sans, sans-serif', color: '#c5d0de', size: 12}, hoverlabel: {bgcolor: '#0b0e14', bordercolor: '#334155', font: {family: 'IBM Plex Mono, monospace', color: '#e7edf5', size: 12}}, hovermode: 'x unified',
                     shapes: [{
                         type: 'line',
                         x0: data.equity_data.x[0],
@@ -1336,7 +886,7 @@
                         y0: initialCapital,
                         y1: initialCapital,
                         line: {
-                            color: 'rgba(128, 128, 128, 0.5)',
+                            color: 'rgba(214, 255, 74, 0.45)',
                             width: 1,
                             dash: 'dash'
                         }
@@ -1344,7 +894,7 @@
                 };
                 
                 // 5. Afficher le graphique d'équité
-                Plotly.newPlot('equity-chart', equityTraces, equityLayout, {responsive: true});
+                Plotly.newPlot('equity-chart', equityTraces, equityLayout, {responsive: true, displaylogo: false});
                 
                 // 6. Créer et afficher le graphique de drawdown
                 const peak = [];
@@ -1363,46 +913,91 @@
                     type: 'scatter',
                     mode: 'lines',
                     name: 'Drawdown',
-                    line: {color: '#ef4444', width: 2},
+                    line: {color: '#ff5d73', width: 1.6},
                     fill: 'tozeroy',
-                    fillcolor: 'rgba(239, 68, 68, 0.2)',
+                    fillcolor: 'rgba(255, 93, 115, 0.16)',
                     hovertemplate: '<b>Date:</b> %{x}<br><b>Drawdown:</b> %{y:.2f}%<extra></extra>'
                 };
                 
                 const drawdownLayout = {
                     title: {
                         text: 'Drawdown (%)',
-                        font: {size: 18, color: '#000000', family: 'Arial Black'}
+                        font: {size: 13, color: '#e7edf5', family: 'IBM Plex Sans, sans-serif'}
                     },
                     xaxis: {
                         title: 'Date',
-                        titlefont: {size: 12, color: '#000000'},
-                        gridcolor: '#e0e0e0'
+                        titlefont: {size: 11, color: '#8b98ab', family: 'IBM Plex Sans, sans-serif'},
+                        gridcolor: 'rgba(148, 163, 184, 0.14)', zerolinecolor: 'rgba(148, 163, 184, 0.22)', tickfont: {color: '#8b98ab', family: 'IBM Plex Mono, monospace', size: 11}, linecolor: '#243041'
                     },
                     yaxis: {
                         title: 'Drawdown (%)',
-                        titlefont: {size: 12, color: '#000000'},
-                        gridcolor: '#e0e0e0'
+                        titlefont: {size: 11, color: '#8b98ab', family: 'IBM Plex Sans, sans-serif'},
+                        gridcolor: 'rgba(148, 163, 184, 0.14)', zerolinecolor: 'rgba(148, 163, 184, 0.22)', tickfont: {color: '#8b98ab', family: 'IBM Plex Mono, monospace', size: 11}, linecolor: '#243041'
                     },
-                    paper_bgcolor: '#ffffff',
-                    plot_bgcolor: '#ffffff',
-                    hovermode: 'x unified'
+                    height: 310, paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    font: {family: 'IBM Plex Sans, sans-serif', color: '#c5d0de', size: 12}, hoverlabel: {bgcolor: '#0b0e14', bordercolor: '#334155', font: {family: 'IBM Plex Mono, monospace', color: '#e7edf5', size: 12}}, hovermode: 'x unified'
                 };
                 
-                Plotly.newPlot('drawdown-chart', [drawdownTrace], drawdownLayout, {responsive: true});
+                Plotly.newPlot('drawdown-chart', [drawdownTrace], drawdownLayout, {responsive: true, displaylogo: false});
                 
                 // 7. Afficher le graphique de prix (déjà au format Plotly)
-                Plotly.newPlot('price-chart', data.price_chart.data, data.price_chart.layout, {responsive: true});
+                Plotly.newPlot('price-chart', paintQuantTraces(data.price_chart.data), paintQuantLayout(data.price_chart.layout), {responsive: true, displaylogo: false});
                 
                 // 8. Afficher le tableau TradingView des positions individuelles EN DESSOUS
                 if (data.tradingview_positions && data.tradingview_positions.length > 0) {
                     displayTradingViewTable(data.tradingview_positions);
                 }
             } else {
-                chartContainer.innerHTML = '<p style="color: #999999; text-align: center; padding: 40px;">NO DATA AVAILABLE</p>';
+                chartContainer.innerHTML = '<p style="color: #8b98ab; text-align: center; padding: 40px;">NO DATA AVAILABLE</p>';
             }
         }
         
+
+        function paintQuantLayout(layout) {
+            const next = Object.assign({}, layout || {});
+            next.paper_bgcolor = 'rgba(0,0,0,0)';
+            next.plot_bgcolor = 'rgba(0,0,0,0)';
+            next.height = next.height || 420;
+            next.font = {family: 'IBM Plex Sans, sans-serif', color: '#c5d0de', size: 12};
+            next.hoverlabel = {bgcolor: '#0b0e14', bordercolor: '#334155', font: {family: 'IBM Plex Mono, monospace', color: '#e7edf5', size: 12}};
+            if (next.title) {
+                const title = Object.assign({}, next.title);
+                title.font = {size: 13, color: '#e7edf5', family: 'IBM Plex Sans, sans-serif'};
+                next.title = title;
+            }
+            ['xaxis', 'yaxis'].forEach((key) => {
+                if (!next[key]) return;
+                const axis = Object.assign({}, next[key]);
+                axis.gridcolor = 'rgba(148, 163, 184, 0.14)';
+                axis.zerolinecolor = 'rgba(148, 163, 184, 0.22)';
+                axis.linecolor = '#243041';
+                axis.tickfont = {color: '#8b98ab', family: 'IBM Plex Mono, monospace', size: 11};
+                if (axis.titlefont) axis.titlefont = Object.assign({}, axis.titlefont, {color: '#8b98ab'});
+                next[key] = axis;
+            });
+            next.legend = Object.assign({font: {color: '#c5d0de', size: 11}, bgcolor: 'rgba(0,0,0,0)'}, next.legend || {});
+            return next;
+        }
+
+        function paintQuantTraces(data) {
+            if (!Array.isArray(data)) return data;
+            return data.map((trace) => {
+                const copy = Object.assign({}, trace);
+                if (copy.type === 'candlestick') {
+                    copy.increasing = {line: {color: '#3ee0a0'}, fillcolor: '#3ee0a0'};
+                    copy.decreasing = {line: {color: '#ff5d73'}, fillcolor: '#ff5d73'};
+                }
+                if (copy.marker && (copy.marker.color === '#000000' || copy.marker.color === 'black')) {
+                    copy.marker = Object.assign({}, copy.marker, {color: '#d6ff4a'});
+                }
+                if (copy.line && (copy.line.color === '#000000' || copy.line.color === 'black')) {
+                    copy.line = Object.assign({}, copy.line, {color: '#d6ff4a'});
+                }
+                return copy;
+            });
+        }
+
         function displayTradingViewTable(positions) {
             console.log('📊 displayTradingViewTable appelée avec:', positions);
             console.log('📊 Nombre de positions:', positions?.length);
@@ -1416,15 +1011,15 @@
             }
             
             let html = `
-                <div style="background: #edeae4; border-radius: 12px; padding: 20px; margin-top: 20px;">
-                    <div style="background: #ffffff; border: 1px solid #ddd9d3; border-radius: 8px; overflow: hidden;">
-                        <div style="background: #000000; color: #ffffff; padding: 15px; font-weight: bold; font-size: 16px;">
+                <div class="book">
+                    <div class="blotter-wrap">
+                        <div class="blotter-head">
                             Détail des Positions
                         </div>
                         <div style="overflow-x: auto;">
-                            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                            <table class="blotter">
                             <thead>
-                                <tr style="background: #f5f5f5; border-bottom: 2px solid #000000;">
+                                <tr>
                                     <th style="padding: 12px 8px; text-align: left; font-weight: 600;">Type</th>
                                     <th style="padding: 12px 8px; text-align: left; font-weight: 600;">Entry Date</th>
                                     <th style="padding: 12px 8px; text-align: left; font-weight: 600;">Exit / Current Date</th>
@@ -1452,13 +1047,12 @@
                 const isWin = pnl > 0;
                 const statusColor = isOpen ? '#1f77b4' : (isWin ? '#10b981' : '#ef4444');
                 const statusText = isOpen ? 'OPEN' : (isWin ? 'WIN' : 'LOSS');
-                const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
-                const progressText = pos.progress || (isOpen ? 'Trade en cours' : '-');
+                                const progressText = pos.progress || (isOpen ? 'Trade en cours' : '-');
                 const entryTime = pos.entry_time || '-';
                 const exitTime = pos.exit_time || '-';
                 
                 html += `
-                    <tr style="background: ${rowBg}; border-bottom: 1px solid #e0e0e0;">
+                    <tr>
                         <td style="padding: 10px 8px; font-weight: 500;">${pos.type}</td>
                         <td style="padding: 10px 8px; font-family: monospace;">${entryTime}</td>
                         <td style="padding: 10px 8px; font-family: monospace;">${exitTime}</td>
@@ -1477,7 +1071,7 @@
                                 ${statusText}
                             </span>
                         </td>
-                        <td style="padding: 10px 8px; font-size: 12px; color: #555555;">${progressText}</td>
+                        <td style="padding: 10px 8px; font-size: 12px; color: #8b98ab;">${progressText}</td>
                     </tr>
                 `;
             });
