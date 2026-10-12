@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="stock_presets.js"></script>
     <style>
         * {
             margin: 0;
@@ -96,6 +97,32 @@
         }
         
         .nav-btn.active {
+            background: #1a1a1a;
+            color: #ffffff;
+            border-color: #1a1a1a;
+        }
+
+        .preset-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        .preset-btn {
+            padding: 8px 14px;
+            border: 1px solid #ddd9d3;
+            border-radius: 8px;
+            background: #ffffff;
+            color: #1a1a1a;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .preset-btn:hover,
+        .preset-btn.active {
             background: #1a1a1a;
             color: #ffffff;
             border-color: #1a1a1a;
@@ -280,6 +307,11 @@
         .btn-secondary:hover {
             background: #f5f5f5;
         }
+
+        .param-preset.active {
+            background: #1a1a1a;
+            color: #ffffff;
+        }
         
         .loading {
             display: none;
@@ -292,6 +324,49 @@
         
         .loading.active {
             display: block;
+            position: sticky;
+            bottom: 16px;
+            z-index: 30;
+            margin: 16px 24px 24px;
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+        }
+
+        .progress-track {
+            width: min(520px, 92%);
+            height: 10px;
+            margin: 18px auto 0;
+            background: #e4e0d8;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background: #1a1a1a;
+            border-radius: 999px;
+            transition: width 0.25s ease;
+        }
+
+        .progress-bar.indeterminate {
+            width: 18%;
+            transition: none;
+            animation: progress-grow 1.6s ease-in-out infinite;
+        }
+
+        @keyframes progress-grow {
+            0% { width: 14%; }
+            50% { width: 82%; }
+            100% { width: 14%; }
+        }
+
+        .progress-detail {
+            margin: 12px 0 0;
+            font-size: 0.85em;
+            font-weight: 500;
+            color: #555;
         }
         
         .results {
@@ -445,15 +520,19 @@
                                 <div class="form-grid">
                                     <div class="form-group">
                                         <label>Stock Symbols (comma-separated)
-                                            <span class="label-help">Ex: AAPL,TSLA,NVDA,MSFT</span>
+                                            <span class="label-help" id="assets-help">Ex: AAPL,TSLA,NVDA,MSFT</span>
                                         </label>
+                                        <div class="preset-buttons">
+                                            <button type="button" class="preset-btn" data-preset="sp500">S&amp;P 500</button>
+                                            <button type="button" class="preset-btn" data-preset="conservative">Conservative Watchlist</button>
+                                        </div>
                                         <textarea id="assets" required>AAPL,TSLA</textarea>
                                     </div>
                                     <div class="form-group">
                                         <label>Max Active Trades
                                             <span class="label-help">Max simultaneous positions</span>
                                         </label>
-                                        <input type="number" id="max_active_trades" value="3" min="1" max="20">
+                                        <input type="number" id="max_active_trades" value="12" min="1" max="20">
                                     </div>
                                     <div class="form-group">
                                         <label>Timeframe</label>
@@ -549,6 +628,12 @@
                                             <span class="label-help">Multiplier per SO</span>
                                         </label>
                                         <input type="number" id="so_volume_scale" value="1.5" min="1" max="3" step="0.1">
+                                    </div>
+                                    <div class="form-group dca-only">
+                                        <label>Max Safety Orders
+                                            <span class="label-help">Per deal</span>
+                                        </label>
+                                        <input type="number" id="max_so" value="20" min="0" max="50" step="1">
                                     </div>
                                     <div class="form-group">
                                         <label>Initial Capital ($)
@@ -652,14 +737,23 @@
                     </div>
             </div>
 
+            <input type="hidden" id="rsi_trigger_mode" value="Level">
+            <input type="hidden" id="bb_trigger_mode" value="Level">
+            <input type="hidden" id="mfi_trigger_mode" value="Level">
+
             <div class="button-container">
+                <button type="button" class="btn btn-secondary param-preset" id="kronos-signal-preset">Kronos Signal v3.2</button>
                 <button type="submit" class="btn btn-primary">Run Portfolio Backtest</button>
                 <button type="button" class="btn btn-secondary" onclick="resetForm()">Reset</button>
             </div>
         </form>
 
         <div class="loading" id="loading">
-            <p>RUNNING PORTFOLIO BACKTEST... THIS MAY TAKE A WHILE</p>
+            <p id="loadingLabel">Backtest du portefeuille</p>
+            <div class="progress-track" aria-hidden="true">
+                <div class="progress-bar indeterminate" id="progressBar"></div>
+            </div>
+            <p class="progress-detail" id="progressDetail">Téléchargement des cours…</p>
         </div>
 
         <div class="results" id="results">
@@ -751,14 +845,126 @@
             targetContent.classList.toggle('active');
         }
         
+        function applySymbolPreset(name, button) {
+            const symbols = (window.STOCK_PRESETS && window.STOCK_PRESETS[name]) || [];
+            if (!symbols.length) return;
+            const assets = document.getElementById('assets');
+            const help = document.getElementById('assets-help');
+            assets.value = symbols.join(',');
+            if (help) help.textContent = symbols.length + ' symboles';
+            document.querySelectorAll('.preset-btn').forEach((item) => item.classList.remove('active'));
+            if (button) button.classList.add('active');
+        }
+
         function resetForm() {
             if (confirm('Reset all parameters?')) {
                 document.getElementById('backtestForm').reset();
                 applyDynamicStockDateRange();
+                ['rsi_trigger_mode', 'bb_trigger_mode', 'mfi_trigger_mode'].forEach((id) => {
+                    document.getElementById(id).value = 'Level';
+                });
+                document.querySelectorAll('.preset-btn, .param-preset').forEach((item) => item.classList.remove('active'));
+                const help = document.getElementById('assets-help');
+                if (help) help.textContent = 'Ex: AAPL,TSLA,NVDA,MSFT';
             }
         }
 
         applyDynamicStockDateRange();
+
+        document.querySelectorAll('.preset-btn').forEach((button) => {
+            button.addEventListener('click', () => applySymbolPreset(button.dataset.preset, button));
+        });
+        document.getElementById('assets').addEventListener('input', () => {
+            document.querySelectorAll('.preset-btn').forEach((item) => item.classList.remove('active'));
+        });
+
+        const KRONOS_SIGNAL_V32 = {
+            dsc: 'RSI + BB',
+            rsi_length: 2,
+            rsi_threshold: 3,
+            rsi_trigger_mode: 'Crossover',
+            mfi_length: 14,
+            mfi_threshold: 20,
+            mfi_trigger_mode: 'Level',
+            bb_length: 50,
+            bb_threshold_low: 0,
+            bb_trigger_mode: 'Level',
+            base_order: 5000,
+            safe_order: 7500,
+            so_volume_scale: 1.5,
+            max_so: 5,
+            initial_capital: 100000,
+            pricedevbase: 'ATR',
+            price_deviation: 1.5,
+            atr_length: 14,
+            atr_mult: 5,
+            atr_step_scale: 1,
+            take_profit: 2,
+            tp_type: 'From Average Entry',
+            commission: 0.1,
+            close_last_trade: 'false',
+            max_trade_duration_bars: 0
+        };
+
+        function applyKronosSignalPreset(button) {
+            Object.entries(KRONOS_SIGNAL_V32).forEach(([id, value]) => {
+                const field = document.getElementById(id);
+                if (field) field.value = value;
+            });
+            button.classList.add('active');
+        }
+
+        document.getElementById('kronos-signal-preset').addEventListener('click', (event) => {
+            applyKronosSignalPreset(event.currentTarget);
+        });
+        document.getElementById('backtestForm').addEventListener('input', (event) => {
+            if (event.target.id === 'assets' || event.target.id === 'kronos-signal-preset') return;
+            document.getElementById('kronos-signal-preset').classList.remove('active');
+        });
+
+        let backtestProgressTimer = null;
+
+        function startBacktestProgress() {
+            const bar = document.getElementById('progressBar');
+            const label = document.getElementById('loadingLabel');
+            const detail = document.getElementById('progressDetail');
+            if (label) label.textContent = 'Backtest du portefeuille';
+            if (detail) detail.textContent = 'Téléchargement des cours…';
+            if (bar) {
+                bar.style.width = '';
+                bar.classList.add('indeterminate');
+            }
+            clearInterval(backtestProgressTimer);
+            const steps = [
+                [6000, 'Calcul des trades…'],
+                [18000, 'Agrégation du portefeuille…'],
+                [40000, 'Préparation des graphiques…']
+            ];
+            const started = Date.now();
+            backtestProgressTimer = setInterval(() => {
+                const elapsed = Date.now() - started;
+                const step = steps.filter((item) => elapsed >= item[0]).pop();
+                if (step && detail) detail.textContent = step[1];
+            }, 500);
+            document.getElementById('loading').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function finishBacktestProgress(message) {
+            clearInterval(backtestProgressTimer);
+            backtestProgressTimer = null;
+            const bar = document.getElementById('progressBar');
+            const detail = document.getElementById('progressDetail');
+            if (bar) {
+                bar.classList.remove('indeterminate');
+                bar.style.width = '100%';
+            }
+            if (detail && message) detail.textContent = message;
+        }
+
+        function stopBacktestProgress() {
+            clearInterval(backtestProgressTimer);
+            backtestProgressTimer = null;
+        }
 
         document.getElementById('backtestForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -768,6 +974,7 @@
             
             loading.classList.add('active');
             results.classList.remove('active');
+            startBacktestProgress();
 
             // Collect all parameters
             const assetsStr = document.getElementById('assets').value;
@@ -796,7 +1003,11 @@
                 base_order: parseFloat(document.getElementById('base_order').value),
                 safe_order: parseFloat(document.getElementById('safe_order').value),
                 so_volume_scale: parseFloat(document.getElementById('so_volume_scale').value),
+                max_so: parseInt(document.getElementById('max_so').value, 10),
                 initial_capital: parseFloat(document.getElementById('initial_capital').value),
+                rsi_trigger_mode: document.getElementById('rsi_trigger_mode').value,
+                bb_trigger_mode: document.getElementById('bb_trigger_mode').value,
+                mfi_trigger_mode: document.getElementById('mfi_trigger_mode').value,
                 
                 // Price Deviation
                 pricedevbase: document.getElementById('pricedevbase').value,
@@ -833,16 +1044,21 @@
 
                 if (data.error) {
                     alert('❌ Error: ' + data.error);
+                    stopBacktestProgress();
                     loading.classList.remove('active');
                     return;
                 }
 
+                finishBacktestProgress('Affichage des résultats…');
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                 displayResults(data);
                 loading.classList.remove('active');
                 results.classList.add('active');
+                results.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
             } catch (error) {
                 alert('❌ Connection error: ' + error.message + '\n\nMake sure the backend server is running on port 5002.');
+                stopBacktestProgress();
                 loading.classList.remove('active');
             }
         });
@@ -1067,6 +1283,102 @@
             }
         }
 
+        function renderDailyPortfolioCharts(dates, equity, positions) {
+            const sampleIdx = [];
+            for (let i = 0; i < dates.length; i++) {
+                const day = String(dates[i]).slice(0, 10);
+                if (!sampleIdx.length || String(dates[sampleIdx[sampleIdx.length - 1]]).slice(0, 10) !== day) {
+                    sampleIdx.push(i);
+                } else {
+                    sampleIdx[sampleIdx.length - 1] = i;
+                }
+            }
+            if (!sampleIdx.length) return;
+
+            const trades = new Map();
+            (positions || []).forEach((pos) => {
+                const entryMs = Date.parse(pos.entry_time);
+                if (!Number.isFinite(entryMs)) return;
+                const stillOpen = Boolean(pos.is_open) || !pos.exit_time;
+                const exitMs = stillOpen ? Infinity : Date.parse(pos.exit_time);
+                const id = String(pos.trade_id || `${pos.asset || ''}|${pos.exit_time || 'open'}`);
+                let trade = trades.get(id);
+                if (!trade) {
+                    trade = { entryMs, exitMs, legs: [] };
+                    trades.set(id, trade);
+                }
+                if (entryMs < trade.entryMs) trade.entryMs = entryMs;
+                if (exitMs > trade.exitMs) trade.exitMs = exitMs;
+                trade.legs.push({ entryMs, exitMs, size: Number(pos.size_usd) || 0 });
+            });
+            const tradeList = Array.from(trades.values());
+
+            const days = [];
+            const allocationPct = [];
+            const openCount = [];
+            sampleIdx.forEach((index) => {
+                const at = Date.parse(dates[index]);
+                const dayEquity = Number(equity[index]) || 0;
+                let allocated = 0;
+                let count = 0;
+                tradeList.forEach((trade) => {
+                    if (trade.entryMs > at || at >= trade.exitMs) return;
+                    count += 1;
+                    trade.legs.forEach((leg) => {
+                        if (leg.entryMs <= at && at < leg.exitMs) allocated += leg.size;
+                    });
+                });
+                days.push(String(dates[index]).slice(0, 10));
+                allocationPct.push(dayEquity > 0 ? (allocated / dayEquity) * 100 : 0);
+                openCount.push(count);
+            });
+
+            const axis = {
+                titlefont: {size: 12, color: '#000000'},
+                gridcolor: '#e0e0e0'
+            };
+            const baseLayout = {
+                paper_bgcolor: '#ffffff',
+                plot_bgcolor: '#ffffff',
+                hovermode: 'closest',
+                margin: {l: 60, r: 24, t: 80, b: 60, pad: 10}
+            };
+
+            Plotly.newPlot('allocation-chart', [{
+                x: days,
+                y: allocationPct,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Allocation',
+                line: {color: '#000000', width: 2, shape: 'hv'},
+                fill: 'tozeroy',
+                fillcolor: 'rgba(0, 0, 0, 0.08)',
+                hovertemplate: '<b>%{x}</b><br>Capital alloué: %{y:.1f}%<extra></extra>'
+            }], {
+                ...baseLayout,
+                title: {text: 'Allocation du capital', font: {size: 18, color: '#000000', family: 'Arial Black'}},
+                xaxis: {...axis, title: 'Date'},
+                yaxis: {...axis, title: 'Capital alloué (%)', rangemode: 'tozero'}
+            }, {responsive: true});
+
+            Plotly.newPlot('positions-chart', [{
+                x: days,
+                y: openCount,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Positions',
+                line: {color: '#1f77b4', width: 2, shape: 'hv'},
+                fill: 'tozeroy',
+                fillcolor: 'rgba(31, 119, 180, 0.12)',
+                hovertemplate: '<b>%{x}</b><br>Trades actifs: %{y}<extra></extra>'
+            }], {
+                ...baseLayout,
+                title: {text: 'Trades actifs', font: {size: 18, color: '#000000', family: 'Arial Black'}},
+                xaxis: {...axis, title: 'Date'},
+                yaxis: {...axis, title: 'Trades simultanés', rangemode: 'tozero'}
+            }, {responsive: true});
+        }
+
         function displayResults(data) {
             // Stocker les données globalement pour l'export CSV
             currentMultiAssetBacktestData = data;
@@ -1194,9 +1506,11 @@
             if (data.combined_equity && data.combined_equity.length > 0) {
                 equityHTML = `
                     <div style="background: #ffffff; padding: 20px; border-radius: 12px; margin: 0 0 20px 0;">
-                        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-                            <div id="equity-chart" style="flex: 1; min-width: 400px;"></div>
-                            <div id="drawdown-chart" style="flex: 1; min-width: 400px;"></div>
+                        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 24px;">
+                            <div id="equity-chart"></div>
+                            <div id="drawdown-chart"></div>
+                            <div id="allocation-chart"></div>
+                            <div id="positions-chart"></div>
                         </div>
                     </div>
                 `;
@@ -1293,40 +1607,33 @@
                     });
                 }
                 
-                // Préparer les groupes de trades une seule fois
-                const tradeGroups = {};
+                const tradeSpans = [];
+                const tradesById = {};
                 allPositions.forEach(pos => {
-                    const tradeId = pos.trade_id || pos.exit_time; // Fallback sur exit_time
-                    if (!tradeGroups[tradeId]) {
-                        tradeGroups[tradeId] = {
-                            entryTimes: [],
-                            exitTimes: [],
-                            asset: pos.asset || 'N/A'
-                        };
+                    const tradeId = pos.trade_id || pos.exit_time;
+                    if (!tradesById[tradeId]) {
+                        tradesById[tradeId] = { entry: Infinity, exit: -Infinity, asset: pos.asset || 'N/A' };
+                        tradeSpans.push(tradesById[tradeId]);
                     }
-                    tradeGroups[tradeId].entryTimes.push(new Date(pos.entry_time));
-                    tradeGroups[tradeId].exitTimes.push(new Date(pos.exit_time));
+                    const span = tradesById[tradeId];
+                    const entryMs = new Date(pos.entry_time).getTime();
+                    const exitMs = new Date(pos.exit_time).getTime();
+                    if (entryMs < span.entry) span.entry = entryMs;
+                    if (exitMs > span.exit) span.exit = exitMs;
                 });
 
                 const openTradesHoverData = dates.map(equityDate => {
-                    const equityDateTime = new Date(equityDate);
-
-                    // Compter les trades ouverts (entre la première entrée et la dernière sortie du trade)
+                    const equityMs = new Date(equityDate).getTime();
                     let openTradesCount = 0;
                     const openAssets = [];
-                    for (const tradeId in tradeGroups) {
-                        const trade = tradeGroups[tradeId];
-                        const tradeEntry = Math.min(...trade.entryTimes);
-                        const tradeExit = Math.max(...trade.exitTimes);
-
-                        if (tradeEntry <= equityDateTime && equityDateTime <= tradeExit) {
+                    for (let i = 0; i < tradeSpans.length; i++) {
+                        const trade = tradeSpans[i];
+                        if (trade.entry <= equityMs && equityMs <= trade.exit) {
                             openTradesCount++;
                             openAssets.push(trade.asset);
                         }
                     }
-
-                    const uniqueAssets = [...new Set(openAssets)];
-                    return [openTradesCount, uniqueAssets.join(', ') || 'None'];
+                    return [openTradesCount, openAssets.length ? [...new Set(openAssets)].join(', ') : 'None'];
                 });
                 
                 // Calculate Y-axis range for better visualization
@@ -1455,27 +1762,17 @@
                 };
                 
                 Plotly.newPlot('drawdown-chart', [drawdownTrace], drawdownLayout, {responsive: true});
+                renderDailyPortfolioCharts(dates, equity, allPositions);
             }
 
-            // Individual asset price charts - render into collapsed sections
-            if (data.per_asset_charts) {
-                Object.entries(data.per_asset_charts).forEach(([asset, chartData]) => {
-                    const chartId = `price-chart-${asset}`;
-                    const chartContainerId = `${chartId}-container`;
-                    const tableId = `trades-table-${asset}`;
-                    
-                    const chartDiv = document.getElementById(chartContainerId);
-                    if (chartDiv) {
-                        // Render the chart using Plotly (chartData is already in Plotly format)
-                        Plotly.newPlot(chartContainerId, chartData.data, chartData.layout, {responsive: true});
-                    }
-                    
-                    // Render the trades table if individual_positions exists
-                    if (perAsset[asset] && perAsset[asset].individual_positions) {
-                        displayTradingViewTableForAsset(tableId, perAsset[asset].individual_positions, asset);
-                    }
-                });
-            }
+            pendingAssetCharts = {};
+            Object.keys(perAsset).forEach((asset) => {
+                pendingAssetCharts[asset] = {
+                    chartData: data.per_asset_charts ? data.per_asset_charts[asset] : null,
+                    positions: perAsset[asset] && perAsset[asset].individual_positions,
+                    drawn: false
+                };
+            });
         }
         
         function displayTradingViewTableForAsset(tableId, positions, asset) {
@@ -1561,16 +1858,33 @@
             tableContainer.innerHTML = html;
         }
 
+        let pendingAssetCharts = {};
+
+        function ensureAssetChart(asset) {
+            const pending = pendingAssetCharts[asset];
+            if (!pending || pending.drawn) return;
+            pending.drawn = true;
+            const chartContainerId = `price-chart-${asset}-container`;
+            if (pending.chartData && document.getElementById(chartContainerId)) {
+                Plotly.newPlot(chartContainerId, pending.chartData.data, pending.chartData.layout, {responsive: true});
+            }
+            if (pending.positions) {
+                displayTradingViewTableForAsset(`trades-table-${asset}`, pending.positions, asset);
+            }
+        }
+
         function toggleChart(chartId, arrowId) {
             const chartDiv = document.getElementById(chartId);
             const arrow = document.getElementById(arrowId);
-            
+            if (!chartDiv) return;
+
             if (chartDiv.style.display === 'none') {
                 chartDiv.style.display = 'block';
-                arrow.style.transform = 'rotate(180deg)';
+                if (arrow) arrow.style.transform = 'rotate(180deg)';
+                ensureAssetChart(chartId.replace(/^price-chart-/, ''));
             } else {
                 chartDiv.style.display = 'none';
-                arrow.style.transform = 'rotate(0deg)';
+                if (arrow) arrow.style.transform = 'rotate(0deg)';
             }
         }
     </script>

@@ -206,6 +206,134 @@ def _is_us_stock(exchange_name: str, data: Optional[Dict] = None) -> bool:
     return _resolve_feed(exchange_name, data)[1] == "stock"
 
 
+def _tradingview_unavailable(error: BaseException) -> bool:
+    """Vrai quand le pont TradingView est injoignable, pas quand un seul ticker manque."""
+    text = str(error).lower()
+    return any(token in text for token in (
+        "ne répond pas",
+        "délai dépassé",
+        "connection",
+        "timed out",
+        "timeout",
+        "refused",
+        "502",
+        "503",
+        "504",
+    ))
+
+
+def _fetch_portfolio_fallback(
+    assets: List[str],
+    kind: str,
+    timeframe: str,
+    since_ms: int,
+    until_ms: int,
+) -> Tuple[Dict[str, pd.DataFrame], str]:
+    """Repli du portefeuille : Binance pour le crypto, Yahoo Finance pour les actions."""
+    frames: Dict[str, pd.DataFrame] = {}
+    if kind == "stock":
+        for asset in assets:
+            try:
+                df = fetch_ohlcv(
+                    exchange="alpaca",
+                    symbol=asset,
+                    timeframe=timeframe,
+                    since_ms=since_ms,
+                    until_ms=until_ms,
+                )
+            except Exception as error:
+                print(f"  ❌ {asset} (Yahoo Finance): {error}")
+                continue
+            if df is not None and not df.empty:
+                frames[asset] = df
+                print(f"  ✅ {asset}: {len(df)} bougies via Yahoo Finance")
+        return frames, "yahoo"
+
+    _, detail, binance_data = fetch_binance_only_cached(
+        bases=list(assets),
+        timeframe=timeframe,
+        lookback_days=365,
+        since_ms=since_ms,
+        until_ms=until_ms,
+    )
+    finals = binance_data.get("__FINAL__", {})
+    alias: Dict[str, str] = {}
+    if detail is not None and not getattr(detail, "empty", True) and "base_input" in detail.columns:
+        for _, row in detail.iterrows():
+            alias[str(row["base_input"])] = str(row["base"])
+    for asset in assets:
+        key = alias.get(asset, asset)
+        df = finals.get(key)
+        if df is None:
+            df = finals.get(asset)
+        if df is not None and not df.empty:
+            frames[asset] = df
+            print(f"  ✅ {asset}: {len(df)} bougies via Binance")
+    return frames, "binance"
+
+
+def _fetch_tradingview_portfolio(
+    assets: List[str],
+    kind: str,
+    quote: str,
+    timeframe: str,
+    since_ms: int,
+    until_ms: int,
+) -> Dict[str, Dict]:
+    """TradingView d'abord. Si le pont ou un symbole échoue, le reste vient du repli."""
+    fetch_data: Dict[str, Dict] = {"__FINAL__": {}, "__FINAL_META__": {}}
+    pending: List[str] = []
+    source_down = False
+
+    print(f"📈 Téléchargement {len(assets)} symboles via TradingView")
+    for asset in assets:
+        if source_down:
+            pending.append(asset)
+            continue
+        try:
+            df = fetch_ohlcv(
+                exchange="tradingview",
+                symbol=asset,
+                timeframe=timeframe,
+                since_ms=since_ms,
+                until_ms=until_ms,
+                quote=quote,
+                kind=kind,
+            )
+        except Exception as error:
+            print(f"  ❌ {asset} (TradingView): {error}")
+            pending.append(asset)
+            if _tradingview_unavailable(error):
+                source_down = True
+                print("  ⚠️ TradingView indisponible, repli pour les symboles restants")
+            continue
+        if df is None or df.empty:
+            print(f"  ⚠️ {asset}: aucune bougie TradingView")
+            pending.append(asset)
+            continue
+        fetch_data["__FINAL__"][asset] = df
+        fetch_data["__FINAL_META__"][asset] = {"provenance": "tradingview", "symbol": asset}
+        print(f"  ✅ {asset}: {len(df)} bougies via TradingView")
+
+    if pending:
+        label = "Yahoo Finance" if kind == "stock" else "Binance"
+        reason = "TradingView indisponible" if source_down else "symboles manquants sur TradingView"
+        print(f"🔄 Repli {label} ({reason}) : {pending}")
+        frames, provenance = _fetch_portfolio_fallback(pending, kind, timeframe, since_ms, until_ms)
+        for asset, df in frames.items():
+            fetch_data["__FINAL__"][asset] = df
+            fetch_data["__FINAL_META__"][asset] = {
+                "provenance": provenance,
+                "symbol": asset,
+                "fallback_from": "tradingview",
+            }
+        still_missing = [asset for asset in pending if asset not in frames]
+        if still_missing:
+            print(f"  ⚠️ Toujours sans données : {still_missing}")
+
+    return fetch_data
+
+
 def _load_single_asset_df(
     symbol: str,
     exchange_name: str,
@@ -4239,7 +4367,7 @@ def backtest_smartbot_v2_multi_endpoint():
         timeframe = data.get('timeframe', '1d')
         start_date = data.get('start_date', '2024-01-01')
         end_date = data.get('end_date', '2025-01-01')
-        max_active_trades = int(data.get('max_active_trades', 3))
+        max_active_trades = int(data.get('max_active_trades', 12))
         
         print(f"📊 Backtest SmartBot V2 Multi-Asset: {assets} sur {exchange_name}")
         print(f"📅 Période: {start_date} → {end_date}")
@@ -4256,6 +4384,9 @@ def backtest_smartbot_v2_multi_endpoint():
         # Configuration des paramètres SmartBot V2
         params = ParametresDCA_SmartBotV2(
             dsc=data.get('dsc', 'RSI + MFI'),
+            rsi_trigger_mode=data.get('rsi_trigger_mode', 'Level'),
+            bb_trigger_mode=data.get('bb_trigger_mode', 'Level'),
+            mfi_trigger_mode=data.get('mfi_trigger_mode', 'Level'),
             base_order=float(data.get('base_order', 1000.0)),
             safe_order=float(data.get('safe_order', 1500.0)),
             max_safe_order=int(data.get('max_so', max_safe_order_default)),
@@ -4296,13 +4427,22 @@ def backtest_smartbot_v2_multi_endpoint():
         tf = tf_map.get(timeframe, '1d')
         
         # ==============================================
+        # TRADINGVIEW, avec repli Binance (crypto) ou Yahoo (actions)
         # ALPACA (US STOCKS) - Téléchargement direct pour chaque stock
         # ==============================================
         fetch_t0 = time.perf_counter()
         source, kind = _resolve_feed(exchange_name, data)
-        if source in ("alpaca", "tradingview"):
-            feed_label = "TradingView" if source == "tradingview" else "Alpaca"
-            print(f"📈 Téléchargement {len(assets)} symboles via {feed_label}")
+        if source == "tradingview":
+            fetch_data = _fetch_tradingview_portfolio(
+                assets, kind, str(quote or "USDT"), tf, since_ms, until_ms
+            )
+            if not fetch_data["__FINAL__"]:
+                fallback = "Yahoo Finance" if kind == "stock" else "Binance"
+                return jsonify({
+                    "error": f"Aucune donnée récupérée. TradingView est indisponible et le repli {fallback} n'a rien renvoyé."
+                }), 400
+        elif source == "alpaca":
+            print(f"📈 Téléchargement {len(assets)} symboles via Alpaca")
             
             fetch_data = {"__FINAL__": {}, "__FINAL_META__": {}}
             
@@ -4321,7 +4461,7 @@ def backtest_smartbot_v2_multi_endpoint():
                     
                     if not df.empty:
                         fetch_data["__FINAL__"][asset] = df
-                        fetch_data["__FINAL_META__"][asset] = {"provenance": feed_label.lower(), "symbol": asset}
+                        fetch_data["__FINAL_META__"][asset] = {"provenance": "alpaca", "symbol": asset}
                         print(f"  ✅ {asset}: {len(df)} bougies")
                     else:
                         print(f"  ⚠️ {asset}: Aucune donnée")
@@ -4333,7 +4473,7 @@ def backtest_smartbot_v2_multi_endpoint():
                     continue
             
             if not fetch_data["__FINAL__"]:
-                return jsonify({"error": f"Aucune donnée récupérée depuis {feed_label} pour les symboles demandés"}), 400
+                return jsonify({"error": "Aucune donnée récupérée depuis Alpaca pour les symboles demandés"}), 400
         
         # ==============================================
         # CRYPTO - Binance uniquement (optimisation performance)
@@ -4550,9 +4690,14 @@ def backtest_smartbot_v2_multi_endpoint():
                 )
                 per_asset_charts[asset] = chart_data
         
+        data_sources = {
+            asset: fetch_data.get("__FINAL_META__", {}).get(asset, {}).get("provenance", source)
+            for asset in assets_prepared
+        }
         response = {
             "success": True,
             "assets": list(assets_prepared.keys()),
+            "data_sources": data_sources,
             "period": f"{start_date} to {end_date}",
             "combined_stats": combined_stats,
             "per_asset_stats": per_asset_stats,
