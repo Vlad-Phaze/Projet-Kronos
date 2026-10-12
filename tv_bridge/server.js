@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { getCandles, searchMarkets } from '@mathieuc/tradingview';
+import { getUser } from './node_modules/@mathieuc/tradingview/dist/http/account.js';
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -83,6 +84,46 @@ function credentials() {
   const signature = process.env.TV_SIGNATURE || process.env.SIGNATURE || '';
   if (!session) return undefined;
   return signature ? { session, signature } : { session };
+}
+
+function applyCredentials(session, signature) {
+  if (session) process.env.TV_SESSION = session;
+  else delete process.env.TV_SESSION;
+  if (signature) process.env.TV_SIGNATURE = signature;
+  else delete process.env.TV_SIGNATURE;
+}
+
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > 8192) {
+        reject(Object.assign(new Error('Requête trop volumineuse.'), { status: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      try {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        resolve(raw ? JSON.parse(raw) : {});
+      } catch {
+        reject(Object.assign(new Error('JSON invalide.'), { status: 400 }));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function publicAuthError(error, session, signature) {
+  let message = String(error?.message || 'Session TradingView refusée.');
+  if (session) message = message.split(session).join('');
+  if (signature) message = message.split(signature).join('');
+  message = message.replace(/\s+/g, ' ').trim();
+  return (message || 'Session TradingView refusée.').slice(0, 240);
 }
 
 function send(res, status, body) {
@@ -182,7 +223,9 @@ async function loadCandles(query) {
     maxCount,
     adjustment: 'splits',
     ...(kind === 'stock' ? { session: 'regular' } : {}),
-    ...(creds ? { credentials: creds } : {}),
+    // Le serveur `data` plafonne à 5 000 bougies intraday. Le plan payant
+    // (jusqu'à 40 000 en Ultimate) est servi par `prodata`.
+    ...(creds ? { credentials: creds, clientOptions: { server: 'prodata' } } : {}),
     timeoutMs,
   });
 
@@ -198,7 +241,9 @@ async function loadCandles(query) {
     }));
 
   const oldest = rows[0]?.time;
-  const truncated = oldest !== undefined && oldest > sinceSec + step * 2 && rows.length >= maxCount - 5;
+  // Un écart de quelques jours est une séance fermée. Au-delà, le plafond du compte
+  // a coupé l'historique avant la date demandée.
+  const truncated = oldest !== undefined && oldest > sinceSec + 7 * 86400;
 
   return {
     symbol,
@@ -218,6 +263,39 @@ const server = http.createServer(async (req, res) => {
       status: 'ok',
       authenticated: Boolean(credentials()),
     });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/session') {
+    if (!authorized(req)) {
+      send(res, 401, { error: 'Jeton TV_BRIDGE_TOKEN refusé.' });
+      return;
+    }
+    const previousSession = process.env.TV_SESSION || '';
+    const previousSignature = process.env.TV_SIGNATURE || '';
+    let session = '';
+    let signature = '';
+    try {
+      const body = await readJson(req);
+      session = String(body.session || '').trim();
+      signature = String(body.signature || '').trim();
+      if (!session || !signature) {
+        send(res, 400, { error: 'Session et signature requises.' });
+        return;
+      }
+      applyCredentials(session, signature);
+      const user = await getUser({ session, signature }, { signal: AbortSignal.timeout(20000) });
+      send(res, 200, {
+        authenticated: true,
+        username: user.username || '',
+      });
+    } catch (error) {
+      applyCredentials(previousSession, previousSignature);
+      send(res, error.status || 401, {
+        error: publicAuthError(error, session, signature),
+        restored: Boolean(previousSession),
+      });
+    }
     return;
   }
 
@@ -248,6 +326,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  const auth = credentials() ? 'compte connecté' : 'accès anonyme';
+  const auth = credentials() ? 'compte connecté, serveur prodata' : 'accès anonyme, serveur data';
   console.log(`TradingView bridge sur http://${HOST}:${PORT} (${auth})`);
 });

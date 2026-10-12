@@ -18,6 +18,11 @@ class ParametresDCA_SmartBotV2:
     dsc: str = "RSI + MFI"  # Options: "RSI", "Bollinger Band %", "MFI", "RSI + BB", "RSI + MFI", "BB + MFI", "All Three"
     dsc2_enabled: bool = False
     dsc2: str = "Bollinger Band %"  # Secondary condition (if enabled)
+    # none = désactivé. above_ema / below_ema : le close de la timeframe régime
+    # doit être au-dessus / en dessous de l'EMA pour ouvrir un nouveau deal.
+    regime_filter: str = "none"
+    regime_ema_length: int = 200
+    regime_timeframe: str = ""
     # Level = valeur sous le seuil. Crossover = le seuil est franchi vers le haut (ta.crossover).
     # Crossunder = franchi vers le bas. Le script v3.2 verrouille RSI en Crossover, BB et MFI en Level.
     rsi_trigger_mode: str = "Level"
@@ -43,6 +48,8 @@ class ParametresDCA_SmartBotV2:
     atr_length: int = 14
     atr_mult: float = 3.0  # Base ATR multiplier
     atr_mult_step_scale: float = 1.2  # ATR multiplier compounds with each SO
+    # Vide = même timeframe que le graphique (trading_timeframe).
+    atr_timeframe: str = ""
     
     # ═══════════════════════════════════════════════════════════
     # TAKE PROFIT SETTINGS
@@ -162,6 +169,199 @@ def _trigger_at(values: np.ndarray, t: int, mode: str, level: float) -> bool:
     return bool(cur < level)
 
 
+_TF_MINUTES = {
+    "1m": 1,
+    "5m": 5,
+    "15m": 15,
+    "1h": 60,
+    "2h": 120,
+    "4h": 240,
+    "1d": 1440,
+}
+_TF_RULE = {
+    "1m": "1min",
+    "5m": "5min",
+    "15m": "15min",
+    "1h": "1h",
+    "2h": "2h",
+    "4h": "4h",
+    "1d": "1D",
+}
+
+
+def timeframe_minutes(timeframe: str) -> int:
+    """Durée d'une bougie en minutes. 0 si la timeframe est inconnue."""
+    return _TF_MINUTES.get((timeframe or "").strip().lower(), 0)
+
+
+def _utc_index(index: pd.Index) -> pd.DatetimeIndex:
+    idx = pd.DatetimeIndex(index)
+    if idx.tz is None:
+        return idx.tz_localize("UTC")
+    return idx.tz_convert("UTC")
+
+
+def _atr_array(prix_df: pd.DataFrame, length: int) -> np.ndarray:
+    """ATR Wilder sur les bougies fournies, même appel que le calcul historique."""
+    n = len(prix_df)
+    length = max(int(length), 1)
+    try:
+        atr = ta.atr(high=prix_df["High"], low=prix_df["Low"], close=prix_df["Close"], length=length)
+        return atr.fillna(0.0).to_numpy() if atr is not None else np.zeros(n)
+    except Exception as e:
+        print(f"⚠️ Erreur ATR: {e}")
+        return np.zeros(n)
+
+
+def _resample_ohlc(prix_df: pd.DataFrame, atr_tf: str) -> pd.DataFrame:
+    """Agrège les bougies du graphique vers une timeframe plus haute, bornée à l'epoch UTC."""
+    indexed = prix_df.copy()
+    indexed.index = _utc_index(indexed.index)
+    aggregated = indexed.resample(
+        _TF_RULE[atr_tf], label="left", closed="left", origin="epoch"
+    ).agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"})
+    return aggregated.dropna(subset=["High", "Low", "Close"])
+
+
+def _align_closed_atr(
+    atr: pd.Series, source_tf: str, chart_index: pd.Index, chart_tf: str
+) -> np.ndarray:
+    """Pose chaque ATR sur les bougies du graphique à partir de la clôture de sa bougie source.
+
+    Une bougie du graphique ne voit que les bougies ATR déjà clôturées à la clôture
+    de cette bougie : la valeur ne contient pas les cours suivants.
+    """
+    values = pd.Series(atr.to_numpy(dtype=float), index=_utc_index(atr.index))
+    values = values[~values.index.duplicated(keep="last")].sort_index()
+    known_at = values.index + pd.Timedelta(minutes=_TF_MINUTES[source_tf])
+    series = pd.Series(values.to_numpy(dtype=float), index=known_at)
+    series = series[~series.index.duplicated(keep="last")].sort_index()
+    closes = _utc_index(chart_index) + pd.Timedelta(minutes=_TF_MINUTES[chart_tf])
+    merged = series.index.union(pd.DatetimeIndex(closes))
+    filled = series.reindex(merged).sort_index().ffill()
+    out = filled.reindex(pd.DatetimeIndex(closes)).to_numpy(dtype=float)
+    return np.nan_to_num(out, nan=0.0)
+
+
+def atr_for_timeframe(
+    prix_df: pd.DataFrame,
+    length: int,
+    chart_tf: str,
+    atr_tf: str = "",
+    atr_ohlcv: Optional[pd.DataFrame] = None,
+) -> np.ndarray:
+    """ATR aligné sur ``prix_df``.
+
+    Timeframe vide ou identique au graphique : ATR des bougies du graphique.
+    Autre timeframe : ATR de ces bougies (série fournie, sinon agrégation si elle
+    est plus haute), reporté à chaque clôture de bougie ATR.
+    """
+    chart_tf = (chart_tf or "").strip().lower()
+    atr_tf = (atr_tf or "").strip().lower() or chart_tf
+    if (
+        not atr_tf
+        or atr_tf == chart_tf
+        or atr_tf not in _TF_MINUTES
+        or chart_tf not in _TF_MINUTES
+    ):
+        return _atr_array(prix_df, length)
+
+    source = atr_ohlcv
+    if source is not None and len(source) > 0:
+        source = source.copy()
+        source.index = _utc_index(source.index)
+        source = source[~source.index.duplicated(keep="first")]
+        if not source.index.is_monotonic_increasing:
+            source = source.sort_index()
+    elif _TF_MINUTES[atr_tf] >= _TF_MINUTES[chart_tf]:
+        source = _resample_ohlc(prix_df, atr_tf)
+    else:
+        print(
+            f"⚠️ Timeframe ATR {atr_tf} plus fine que {chart_tf} sans bougies dédiées : "
+            f"ATR calculé sur {chart_tf}"
+        )
+        return _atr_array(prix_df, length)
+
+    if source is None or source.empty:
+        return np.zeros(len(prix_df))
+    try:
+        atr = ta.atr(high=source["High"], low=source["Low"], close=source["Close"], length=max(int(length), 1))
+    except Exception as e:
+        print(f"⚠️ Erreur ATR ({atr_tf}): {e}")
+        return np.zeros(len(prix_df))
+    if atr is None:
+        return np.zeros(len(prix_df))
+    return _align_closed_atr(atr, atr_tf, prix_df.index, chart_tf)
+
+
+def _ema_flags(frame: pd.DataFrame, length: int, above: bool) -> pd.Series:
+    """1 quand le close est du bon côté de l'EMA, NaN tant que l'EMA n'existe pas."""
+    try:
+        ema = ta.ema(frame["Close"], length=max(int(length), 1))
+    except Exception as e:
+        print(f"⚠️ Erreur EMA régime: {e}")
+        ema = None
+    if ema is None:
+        return pd.Series(np.nan, index=frame.index, dtype=float)
+    close = frame["Close"]
+    ok = close > ema if above else close < ema
+    return ok.astype(float).where(ema.notna())
+
+
+def regime_mask(
+    prix_df: pd.DataFrame,
+    mode: str,
+    length: int,
+    chart_tf: str,
+    regime_tf: str = "",
+    regime_ohlcv: Optional[pd.DataFrame] = None,
+) -> np.ndarray:
+    """Masque d'ouverture d'un nouveau deal. ``none`` laisse passer toutes les barres.
+
+    Même timeframe que le graphique : close et EMA de la bougie courante.
+    Autre timeframe : condition de la dernière bougie régime déjà clôturée.
+    """
+    mode = (mode or "none").strip().lower()
+    if mode in ("", "none", "off"):
+        return np.ones(len(prix_df), dtype=bool)
+    above = mode == "above_ema"
+    if mode not in ("above_ema", "below_ema"):
+        return np.ones(len(prix_df), dtype=bool)
+
+    chart_tf = (chart_tf or "").strip().lower()
+    regime_tf = (regime_tf or "").strip().lower() or chart_tf
+    length = max(int(length), 1)
+    same = (
+        not regime_tf
+        or regime_tf == chart_tf
+        or regime_tf not in _TF_MINUTES
+        or chart_tf not in _TF_MINUTES
+    )
+    if same:
+        return _ema_flags(prix_df, length, above).fillna(0.0).to_numpy(dtype=float) > 0.5
+
+    source = regime_ohlcv
+    if source is not None and len(source) > 0:
+        source = source.copy()
+        source.index = _utc_index(source.index)
+        source = source[~source.index.duplicated(keep="first")]
+        if not source.index.is_monotonic_increasing:
+            source = source.sort_index()
+    elif _TF_MINUTES[regime_tf] >= _TF_MINUTES[chart_tf]:
+        source = _resample_ohlc(prix_df, regime_tf)
+    else:
+        print(
+            f"⚠️ Timeframe régime {regime_tf} plus fine que {chart_tf} sans bougies dédiées : "
+            f"EMA calculée sur {chart_tf}"
+        )
+        return _ema_flags(prix_df, length, above).fillna(0.0).to_numpy(dtype=float) > 0.5
+
+    if source is None or source.empty:
+        return np.zeros(len(prix_df), dtype=bool)
+    aligned = _align_closed_atr(_ema_flags(source, length, above), regime_tf, prix_df.index, chart_tf)
+    return aligned > 0.5
+
+
 def calculer_indicateurs_smartbot(prix_df: pd.DataFrame, parametres: ParametresDCA_SmartBotV2) -> Dict[str, np.ndarray]:
     """Calcule TOUS les indicateurs nécessaires pour SmartBot V2"""
     close = prix_df['Close'].to_numpy()
@@ -203,15 +403,16 @@ def calculer_indicateurs_smartbot(prix_df: pd.DataFrame, parametres: ParametresD
         indicators['mfi'] = np.full(n, 50.0)
     
     # ═════════════════════════════════════════════════════════
-    # ATR (Average True Range)
+    # ATR (Average True Range), sur atr_timeframe si elle diffère du graphique
     # ═══════════════════════════════════════════════════════════
-    try:
-        atr = ta.atr(high=prix_df['High'], low=prix_df['Low'], close=prix_df['Close'], 
-                     length=parametres.atr_length)
-        indicators['atr'] = atr.fillna(0.0).to_numpy() if atr is not None else np.zeros(n)
-    except Exception as e:
-        print(f"⚠️ Erreur ATR: {e}")
-        indicators['atr'] = np.zeros(n)
+    atr_ohlcv = prix_df.attrs.get("atr_ohlcv") if getattr(prix_df, "attrs", None) else None
+    indicators["atr"] = atr_for_timeframe(
+        prix_df,
+        parametres.atr_length,
+        parametres.trading_timeframe,
+        parametres.atr_timeframe,
+        atr_ohlcv,
+    )
     
     return indicators
 
@@ -382,6 +583,15 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     if verbose:
         print("🎯 Pré-calcul vectorisé des signaux d'entrée...")
     entry_signals = evaluer_entry_signal_vectorized(indicators, parametres)
+    regime_ohlcv = prix.attrs.get("regime_ohlcv") if getattr(prix, "attrs", None) else None
+    regime_ok = regime_mask(
+        prix,
+        parametres.regime_filter,
+        parametres.regime_ema_length,
+        parametres.trading_timeframe,
+        parametres.regime_timeframe,
+        regime_ohlcv,
+    )
     
     close = prix["Close"].to_numpy(dtype=float)
     high = prix["High"].to_numpy(dtype=float)
@@ -449,7 +659,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
         # ═══════════════════════════════════════════════════════════
         # LOGIQUE D'ENTRÉE (BASE ORDER)
         # ═══════════════════════════════════════════════════════════
-        if not in_trade and t != last_close_bar and entry_signal and market_bar_allowed:
+        if not in_trade and t != last_close_bar and entry_signal and market_bar_allowed and regime_ok[t]:
             # Vérifier capital disponible
             qty, order_cost = order_fill(parametres.base_order, price)
             if parametres.check_cash and capital_disponible < order_cost:

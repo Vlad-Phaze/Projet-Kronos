@@ -67,6 +67,7 @@
                                         <select id="timeframe">
                                             <option value="15m">15 minutes</option>
                                             <option value="1h" selected>1 hour</option>
+                                            <option value="2h">2 hours</option>
                                             <option value="4h">4 hours</option>
                                             <option value="1d">1 day</option>
                                         </select>
@@ -128,6 +129,34 @@
                                     <div class="form-group">
                                         <label>BB% Lower Threshold</label>
                                         <input type="number" id="bb_threshold_low" value="0.0" max="1" step="0.01">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Regime Filter
+                                            <span class="label-help">New deals only</span>
+                                        </label>
+                                        <select id="regime_filter">
+                                            <option value="none" selected>None</option>
+                                            <option value="above_ema">Price above EMA</option>
+                                            <option value="below_ema">Price below EMA</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>EMA Length</label>
+                                        <input type="number" id="regime_ema_length" value="200" min="1" max="500">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Regime Timeframe
+                                            <span class="label-help">Follows chart timeframe</span>
+                                        </label>
+                                        <select id="regime_timeframe">
+                                            <option value="1m">1 minute</option>
+                                            <option value="5m">5 minutes</option>
+                                            <option value="15m">15 minutes</option>
+                                            <option value="1h" selected>1 hour</option>
+                                            <option value="2h">2 hours</option>
+                                            <option value="4h">4 hours</option>
+                                            <option value="1d">1 day</option>
+                                        </select>
                                     </div>
                                 </div>
                             </div>
@@ -196,6 +225,20 @@
                                             <span class="label-help">Not used if ATR</span>
                                         </label>
                                         <input type="number" id="price_deviation" value="4.0" min="0.1" step="0.1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>ATR Timeframe
+                                            <span class="label-help">Follows chart timeframe</span>
+                                        </label>
+                                        <select id="atr_timeframe">
+                                            <option value="1m">1 minute</option>
+                                            <option value="5m">5 minutes</option>
+                                            <option value="15m">15 minutes</option>
+                                            <option value="1h" selected>1 hour</option>
+                                            <option value="2h">2 hours</option>
+                                            <option value="4h">4 hours</option>
+                                            <option value="1d">1 day</option>
+                                        </select>
                                     </div>
                                     <div class="form-group">
                                         <label>ATR Length</label>
@@ -461,28 +504,35 @@
 
         let backtestProgressTimer = null;
 
-        function startBacktestProgress() {
+        function startBacktestProgress(progressId) {
             const bar = document.getElementById('progressBar');
             const label = document.getElementById('loadingLabel');
             const detail = document.getElementById('progressDetail');
             if (label) label.textContent = 'Backtest du portefeuille';
             if (detail) detail.textContent = 'Téléchargement des cours…';
             if (bar) {
-                bar.style.width = '';
-                bar.classList.add('indeterminate');
+                bar.classList.remove('indeterminate');
+                bar.style.width = '0%';
             }
             clearInterval(backtestProgressTimer);
-            const steps = [
-                [6000, 'Calcul des trades…'],
-                [18000, 'Agrégation du portefeuille…'],
-                [40000, 'Préparation des graphiques…']
-            ];
-            const started = Date.now();
-            backtestProgressTimer = setInterval(() => {
-                const elapsed = Date.now() - started;
-                const step = steps.filter((item) => elapsed >= item[0]).pop();
-                if (step && detail) detail.textContent = step[1];
-            }, 500);
+            const hostname = (window.location.hostname || '').toLowerCase();
+            const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
+            const apiBase = isLocal
+                ? 'http://localhost:5002'
+                : 'https://kronos-back-pdr0.onrender.com';
+            backtestProgressTimer = setInterval(async () => {
+                try {
+                    const response = await fetch(`${apiBase}/backtest-progress/${progressId}`);
+                    if (!response.ok) return;
+                    const data = await response.json();
+                    if (detail && data.label) detail.textContent = data.label;
+                    if (bar && typeof data.percent === 'number') {
+                        bar.style.width = Math.max(0, Math.min(99, data.percent)) + '%';
+                    }
+                } catch (_error) {
+                    /* la requête principale continue */
+                }
+            }, 700);
             document.getElementById('loading').scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
@@ -503,6 +553,31 @@
             backtestProgressTimer = null;
         }
 
+        (function bindChartTimeframeFollowers() {
+            const chartTf = document.getElementById('timeframe');
+            const form = chartTf && chartTf.closest('form');
+            if (!chartTf) return;
+            ['atr_timeframe', 'regime_timeframe'].forEach((id) => {
+                const field = document.getElementById(id);
+                if (!field) return;
+                let custom = false;
+                const follow = () => {
+                    if (!custom) field.value = chartTf.value;
+                };
+                chartTf.addEventListener('change', follow);
+                field.addEventListener('change', () => {
+                    custom = field.value !== chartTf.value;
+                });
+                if (form) {
+                    form.addEventListener('reset', () => {
+                        custom = false;
+                        setTimeout(follow, 0);
+                    });
+                }
+                follow();
+            });
+        })();
+
         document.getElementById('backtestForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -511,7 +586,8 @@
             
             loading.classList.add('active');
             results.classList.remove('active');
-            startBacktestProgress();
+            const progressId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+            startBacktestProgress(progressId);
 
             // Collect all parameters
             const assetsStr = document.getElementById('assets').value;
@@ -519,6 +595,7 @@
             
             const params = {
                 assets: assets,
+                progress_id: progressId,
                 quote: "USD",
                 max_active_trades: parseInt(document.getElementById('max_active_trades').value),
                 exchange: "tradingview",
@@ -535,6 +612,9 @@
                 mfi_threshold: parseInt(document.getElementById('mfi_threshold').value),
                 bb_length: parseInt(document.getElementById('bb_length').value),
                 bb_threshold_low: parseFloat(document.getElementById('bb_threshold_low').value),
+                regime_filter: document.getElementById('regime_filter').value,
+                regime_ema_length: parseInt(document.getElementById('regime_ema_length').value),
+                regime_timeframe: document.getElementById('regime_timeframe').value,
                 
                 // Orders
                 base_order: parseFloat(document.getElementById('base_order').value),
@@ -550,6 +630,7 @@
                 pricedevbase: document.getElementById('pricedevbase').value,
                 price_deviation: parseFloat(document.getElementById('price_deviation').value),
                 atr_length: parseInt(document.getElementById('atr_length').value),
+                atr_timeframe: document.getElementById('atr_timeframe').value,
                 atr_mult: parseFloat(document.getElementById('atr_mult').value),
                 atr_step_scale: parseFloat(document.getElementById('atr_step_scale').value),
                 
@@ -1459,5 +1540,6 @@
             }
         }
     </script>
+    <script src="tv_connect.js"></script>
 </body>
 </html>

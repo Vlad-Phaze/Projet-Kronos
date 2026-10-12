@@ -12,7 +12,10 @@ Ce qui est propre au portefeuille :
 * capital partagé entre tous les assets ;
 * ``max_active_trades`` positions simultanées ;
 * à chaque barre : 1) TP/SL/durée/SO des positions ouvertes (dans l'ordre d'ouverture), 2) nouvelles
-  entrées dans l'ordre des assets tant qu'il reste des slots et du capital.
+  entrées dans l'ordre des assets tant qu'il reste des slots et du capital ;
+* un signal refusé (slots pleins ou cash insuffisant) occupe quand même le symbole jusqu'à la sortie
+  qu'aurait eue ce deal. Le prochain signal est donc celui du backtest indépendant, comme un flux
+  d'alertes TradingView filtré par le nombre de places.
 
 Architecture : ``PreparedPortfolio`` aligne les assets sur une timeline commune (tableaux numpy 2D) et met
 les indicateurs en cache ; ``_portfolio_kernel`` (numba, sans GIL) fait la boucle ; ``optimize_portfolio``
@@ -32,7 +35,14 @@ import pandas as pd
 import pandas_ta as ta
 from numba import njit
 
-from backtester_exact import ParametresDCA_SmartBotV2, _trigger_mask, bb_percent_tv, order_fill
+from backtester_exact import (
+    ParametresDCA_SmartBotV2,
+    _trigger_mask,
+    atr_for_timeframe,
+    bb_percent_tv,
+    order_fill,
+    regime_mask,
+)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Indicateurs (mêmes appels pandas_ta et mêmes valeurs de repli que le backtester mono-asset)
@@ -137,7 +147,12 @@ class PreparedPortfolio:
 
         self.assets: List[str] = list(assets_data.keys())
         self._dfs: Dict[str, pd.DataFrame] = {}
+        self._atr_src: Dict[str, Optional[pd.DataFrame]] = {}
+        self._regime_src: Dict[str, Optional[pd.DataFrame]] = {}
         for a, df in assets_data.items():
+            attrs = df.attrs if getattr(df, "attrs", None) else {}
+            self._atr_src[a] = attrs.get("atr_ohlcv")
+            self._regime_src[a] = attrs.get("regime_ohlcv")
             df = df[~df.index.duplicated(keep="first")]
             if not df.index.is_monotonic_increasing:
                 df = df.sort_index()
@@ -203,12 +218,61 @@ class PreparedPortfolio:
         """Pré-calcule les indicateurs utiles à ``p`` (à appeler avant le multi-threading)."""
         self.atr_for(p)
         self.entry_signals(p)
+        self.regime_for(p)
         self.allowed(p)
 
     def atr_for(self, p: ParametresDCA_SmartBotV2) -> np.ndarray:
-        if _MODES.get(p.pricedevbase, _MODE_NONE) == _MODE_ATR:
-            return self.indicator("atr", p.atr_length)
-        return _EMPTY_2D
+        if _MODES.get(p.pricedevbase, _MODE_NONE) != _MODE_ATR:
+            return _EMPTY_2D
+        chart_tf = (p.trading_timeframe or "").strip()
+        atr_tf = (getattr(p, "atr_timeframe", "") or "").strip()
+        cache_key = ("atr", int(p.atr_length), chart_tf, atr_tf)
+        arr = self._cache.get(cache_key)
+        if arr is not None:
+            return arr
+        with self._lock:
+            arr = self._cache.get(cache_key)
+            if arr is None:
+                arr = np.zeros(self.close.shape)
+                for j, asset in enumerate(self.assets):
+                    arr[self._pos[asset], j] = atr_for_timeframe(
+                        self._dfs[asset],
+                        int(p.atr_length),
+                        chart_tf,
+                        atr_tf,
+                        self._atr_src.get(asset),
+                    )
+                self._cache[cache_key] = arr
+        return arr
+
+    def regime_for(self, p: ParametresDCA_SmartBotV2) -> np.ndarray:
+        """Masque [barres x assets] des barres où un nouveau deal est autorisé."""
+        mode = (getattr(p, "regime_filter", "none") or "none").strip().lower()
+        chart_tf = (p.trading_timeframe or "").strip()
+        regime_tf = (getattr(p, "regime_timeframe", "") or "").strip()
+        length = int(getattr(p, "regime_ema_length", 200) or 200)
+        cache_key = ("regime", mode, length, chart_tf, regime_tf)
+        arr = self._cache.get(cache_key)
+        if arr is not None:
+            return arr
+        with self._lock:
+            arr = self._cache.get(cache_key)
+            if arr is None:
+                if mode in ("", "none", "off"):
+                    arr = np.ones(self.close.shape, dtype=np.bool_)
+                else:
+                    arr = np.zeros(self.close.shape, dtype=np.bool_)
+                    for j, asset in enumerate(self.assets):
+                        arr[self._pos[asset], j] = regime_mask(
+                            self._dfs[asset],
+                            mode,
+                            length,
+                            chart_tf,
+                            regime_tf,
+                            self._regime_src.get(asset),
+                        )
+                self._cache[cache_key] = arr
+        return arr
 
     def allowed(self, p: ParametresDCA_SmartBotV2) -> np.ndarray:
         """Masque [barres] des barres où le trading est autorisé (horaires de marché US si activé)."""
@@ -229,11 +293,34 @@ class PreparedPortfolio:
         return arr
 
     def _part(self, name: str, p: ParametresDCA_SmartBotV2) -> np.ndarray:
+        """Masque Level / Crossover / Crossunder, calculé sur la série propre de l'asset.
+
+        Le placer sur la timeline commune avant le test fausserait le croisement : la barre
+        précédente serait alors un trou (RSI de repli à 50) et non la barre précédente du symbole.
+        """
         if name == "rsi":
-            return _trigger_mask(self.indicator("rsi", p.rsi_length), p.rsi_trigger_mode, p.dsc_rsi_threshold_low)
-        if name == "mfi":
-            return _trigger_mask(self.indicator("mfi", p.mfi_length), p.mfi_trigger_mode, p.mfi_threshold_low)
-        return _trigger_mask(self.indicator("bb", p.bb_length, p.bb_mult), p.bb_trigger_mode, p.bb_threshold_low)
+            ind_name, ind_key = "rsi", (int(p.rsi_length),)
+            mode, level = p.rsi_trigger_mode, float(p.dsc_rsi_threshold_low)
+        elif name == "mfi":
+            ind_name, ind_key = "mfi", (int(p.mfi_length),)
+            mode, level = p.mfi_trigger_mode, float(p.mfi_threshold_low)
+        else:
+            ind_name, ind_key = "bb", (int(p.bb_length), float(p.bb_mult))
+            mode, level = p.bb_trigger_mode, float(p.bb_threshold_low)
+        cache_key = ("part", ind_name, *ind_key, mode, level)
+        arr = self._cache.get(cache_key)
+        if arr is not None:
+            return arr
+        with self._lock:
+            arr = self._cache.get(cache_key)
+            if arr is None:
+                func, _fill = _INDICATORS[ind_name]
+                arr = np.zeros(self.close.shape, dtype=np.bool_)
+                for j, asset in enumerate(self.assets):
+                    values = func(self._dfs[asset], *ind_key)
+                    arr[self._pos[asset], j] = _trigger_mask(values, mode, level)
+                self._cache[cache_key] = arr
+        return arr
 
     def entry_signals(self, p: ParametresDCA_SmartBotV2) -> np.ndarray:
         """Signal d'entrée [barres x assets] - équivalent de ``evaluer_entry_signal`` (DSC + DSC2)."""
@@ -338,8 +425,40 @@ def _so_step(a, t, price, prev, atrv, sig, mode, max_so,
 
 
 @njit(cache=True, nogil=True)
+def _try_exit(price, high_px, low_px, open_px, avg, base_price, tp_live, tp_mult, tp_from_avg,
+              sl_pct, max_dur, own_now, entry_own, price_tick):
+    """Décide d'une sortie. Retourne (hit, reason, exit_price) avec reason 0 TP, 2 SL, 3 TIME."""
+    if tp_from_avg:
+        tp_price = avg * tp_mult
+    else:
+        tp_price = base_price * tp_mult
+    touch = high_px if tp_live else price
+    if price_tick > 0.0:
+        touch = np.floor(touch / price_tick + 0.5) * price_tick
+        tp_hit = touch + 1e-6 >= tp_price
+    else:
+        tp_hit = touch >= tp_price
+
+    sl_hit = False
+    sl_price = 0.0
+    if sl_pct > 0.0:
+        sl_price = avg * (1.0 - sl_pct / 100.0)
+        sl_hit = low_px <= sl_price
+
+    time_hit = max_dur > 0 and (own_now - entry_own) >= max_dur
+    if not (tp_hit or sl_hit or time_hit):
+        return False, 0, 0.0
+    if sl_hit:
+        exit_price = open_px if open_px <= sl_price else sl_price
+        return True, 2, exit_price
+    if tp_hit:
+        return True, 0, tp_price
+    return True, 3, price
+
+
+@njit(cache=True, nogil=True)
 def _portfolio_kernel(
-    close, high, low, open_px, prev_close, present, signal, atr, allowed, own_idx, last_close, last_bar, close_ok,
+    close, high, low, open_px, prev_close, present, signal, regime, atr, allowed, own_idx, last_close, last_bar, close_ok,
     mode, tp_mult, tp_from_avg, sl_pct, max_dur, so_enabled, commission, max_so, base_order,
     initial_capital, max_active, so_size_tbl, atr_mult_tbl, dev_tbl, cum_tbl,     close_last,
     price_tick, check_cash,
@@ -371,6 +490,8 @@ def _portfolio_kernel(
     # est déjà en carnet : la mèche (high) suffit. Le prix testé est arrondi au mintick.
     tp_live = np.zeros(n_assets, np.bool_)
     last_close_bar = np.full(n_assets, -1, np.int64)
+    # Deal refusé : le symbole suit la sortie qu'il aurait eue, sans capital ni slot.
+    shadow = np.zeros(n_assets, np.bool_)
     skipped = np.zeros(n_assets, np.int64)
     so_bar_buf = np.zeros((n_assets, width), np.int64)
     so_px_buf = np.zeros((n_assets, width))
@@ -404,38 +525,10 @@ def _portfolio_kernel(
             lastpx[a] = price
 
             if ok_bar:
-                if tp_from_avg:
-                    tp_price = avg[a] * tp_mult
-                else:
-                    tp_price = base_price[a] * tp_mult
-                touch = high[t, a] if tp_live[a] else price
-                if price_tick > 0.0:
-                    touch = np.floor(touch / price_tick + 0.5) * price_tick
-                    tp_hit = touch + 1e-6 >= tp_price
-                else:
-                    tp_hit = touch >= tp_price
-
-                sl_hit = False
-                sl_price = 0.0
-                if sl_pct > 0:
-                    sl_price = avg[a] * (1 - sl_pct / 100.0)
-                    sl_hit = low[t, a] <= sl_price
-
-                time_hit = max_dur > 0 and (own_idx[t, a] - entry_own[a]) >= max_dur
-
-                if tp_hit or sl_hit or time_hit:
-                    # priorité SL > TP > durée max (comme le mono-asset)
-                    if sl_hit:
-                        # Gap : l'open est déjà sous le stop, on sort au premier prix de la barre.
-                        bar_open = open_px[t, a]
-                        exit_price = bar_open if bar_open <= sl_price else sl_price
-                        reason = 2
-                    elif tp_hit:
-                        exit_price = tp_price
-                        reason = 0
-                    else:
-                        exit_price = price
-                        reason = 3
+                hit, reason, exit_price = _try_exit(
+                    price, high[t, a], low[t, a], open_px[t, a], avg[a], base_price[a], tp_live[a],
+                    tp_mult, tp_from_avg, sl_pct, max_dur, own_idx[t, a], entry_own[a], price_tick)
+                if hit:
                     gross = exit_price * qty[a]
                     fees = (invested[a] + gross) * commission
                     pnl = gross - invested[a] - fees
@@ -466,13 +559,36 @@ def _portfolio_kernel(
             w += 1
         n_open = w
 
-        # ── Phase 2 : nouvelles entrées (Base Order) ─────────────────────────
-        slots = max_active - n_open
-        if slots > 0 and ok_bar:
+        # Deals refusés : même sortie que le symbole seul, sans toucher au capital ni aux slots.
+        if ok_bar:
             for a in range(n_assets):
-                if slots <= 0:
-                    break
-                if in_pos[a] or last_close_bar[a] == t or not signal[t, a]:
+                if not shadow[a] or not present[t, a]:
+                    continue
+                price = close[t, a]
+                hit, _, _ = _try_exit(
+                    price, high[t, a], low[t, a], open_px[t, a], avg[a], base_price[a], tp_live[a],
+                    tp_mult, tp_from_avg, sl_pct, max_dur, own_idx[t, a], entry_own[a], price_tick)
+                if hit:
+                    shadow[a] = False
+                    in_pos[a] = False
+                    last_close_bar[a] = t
+                    tp_live[a] = False
+                    continue
+                if so_enabled:
+                    _so_step(
+                        a, t, price, prev_close[t, a], atr[t, a] if mode == 0 else 0.0, signal[t, a], mode,
+                        max_so, so_size_tbl, atr_mult_tbl, dev_tbl, cum_tbl,
+                        qty, invested, avg, base_price, last_so, so_cnt, so_bar_buf, so_px_buf, 0.0,
+                        False)
+                tp_live[a] = True
+
+        # ── Phase 2 : nouvelles entrées (Base Order) ─────────────────────────
+        # L'ordre des assets donne la priorité. Les signaux qui ne rentrent pas restent
+        # virtuels jusqu'à leur sortie, pour que le signal suivant soit le prochain deal.
+        if ok_bar:
+            slots = max_active - n_open
+            for a in range(n_assets):
+                if in_pos[a] or last_close_bar[a] == t or not signal[t, a] or not regime[t, a]:
                     continue
                 price = close[t, a]
                 order_qty = base_order / price
@@ -481,10 +597,7 @@ def _portfolio_kernel(
                     order_cost = price
                 else:
                     order_cost = base_order
-                if check_cash and capital < order_cost:
-                    skipped[a] += 1
-                    continue
-                capital -= order_cost
+                take = slots > 0 and not (check_cash and capital < order_cost)
                 in_pos[a] = True
                 base_price[a] = price
                 avg[a] = price
@@ -496,16 +609,27 @@ def _portfolio_kernel(
                 entry_bar[a] = t
                 entry_own[a] = own_idx[t, a]
                 tp_live[a] = False
-                order[n_open] = a
-                n_open += 1
-                slots -= 1
+                if take:
+                    capital -= order_cost
+                    order[n_open] = a
+                    n_open += 1
+                    slots -= 1
+                    so_cash = check_cash
+                    so_capital = capital
+                else:
+                    skipped[a] += 1
+                    shadow[a] = True
+                    so_cash = False
+                    so_capital = 0.0
                 # le mono-asset évalue aussi les SO sur la barre d'entrée
                 if so_enabled:
-                    capital = _so_step(
+                    so_capital = _so_step(
                         a, t, price, prev_close[t, a], atr[t, a] if mode == 0 else 0.0, True, mode, max_so,
                         so_size_tbl, atr_mult_tbl, dev_tbl, cum_tbl,
-                        qty, invested, avg, base_price, last_so, so_cnt, so_bar_buf, so_px_buf, capital,
-                        check_cash)
+                        qty, invested, avg, base_price, last_so, so_cnt, so_bar_buf, so_px_buf, so_capital,
+                        so_cash)
+                    if take:
+                        capital = so_capital
 
         # ── Equity : cash + valeur de marché (dernier prix connu si barre absente) ──
         tot = capital
@@ -596,7 +720,7 @@ def _run(prep: PreparedPortfolio, p: ParametresDCA_SmartBotV2, max_active_trades
     effective_stop_loss = float(p.stop_loss) if p.strategy_mode == "stop_loss" else 0.0
 
     return _portfolio_kernel(
-        prep.close, prep.high, prep.low, prep.open_px, prep.prev_close, prep.present, prep.entry_signals(p), prep.atr_for(p),
+        prep.close, prep.high, prep.low, prep.open_px, prep.prev_close, prep.present, prep.entry_signals(p), prep.regime_for(p), prep.atr_for(p),
         allowed, prep.own_idx, prep.last_close, prep.last_bar, close_ok,
         _MODES.get(p.pricedevbase, _MODE_NONE),
         1 + p.take_profit / 100.0,

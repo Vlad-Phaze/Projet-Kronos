@@ -445,6 +445,7 @@ _YF_LOOKBACK_DAYS = {
     "5m": 60,
     "15m": 60,
     "1h": 730,
+    "2h": 730,
     "4h": 730,
 }
 
@@ -461,6 +462,26 @@ def _yahoo_window_error(timeframe: str, start_dt: datetime) -> Optional[str]:
         f"Yahoo Finance ne fournit le {timeframe} que sur les {max_days} derniers jours "
         f"(début demandé il y a {age_days} jours). Réduis la période ou utilise le daily (1d)."
     )
+
+
+def _aggregate_2h(df: pd.DataFrame) -> pd.DataFrame:
+    """Agrège des bougies 1h en bougies 2h (resample UTC)."""
+    if df.empty:
+        return df
+    work = df.copy()
+    if not isinstance(work.index, pd.DatetimeIndex):
+        work.index = pd.DatetimeIndex(pd.to_datetime(work.index, utc=True))
+    elif work.index.tz is None:
+        work.index = work.index.tz_localize("UTC")
+    agg = work.resample("2h").agg(
+        open=("open", "first"),
+        high=("high", "max"),
+        low=("low", "min"),
+        close=("close", "last"),
+        volume=("volume", "sum"),
+    )
+    agg.index.name = "date"
+    return agg.dropna(subset=["open"])
 
 
 def _aggregate_us_4h(df: pd.DataFrame) -> pd.DataFrame:
@@ -505,7 +526,7 @@ def fetch_ohlcv_alpaca(symbol: str, timeframe: str,
     
     Args:
         symbol: Ticker du stock (ex: 'AAPL', 'TSLA')
-        timeframe: '1m', '5m', '15m', '1h', '4h', '1d'
+        timeframe: '1m', '5m', '15m', '1h', '2h', '4h', '1d'
         since_ms: Timestamp de début en millisecondes
         until_ms: Timestamp de fin en millisecondes
         errors: Liste pour logger les erreurs
@@ -520,11 +541,12 @@ def fetch_ohlcv_alpaca(symbol: str, timeframe: str,
         "5m": "5m",
         "15m": "15m",
         "1h": "1h",
+        "2h": "1h",  # Yahoo n'a pas de 2h : on télécharge du 1h puis on agrège
         "4h": "1h",  # Yahoo n'a pas de 4h : on télécharge du 1h puis on agrège
         "1d": "1d",
     }
     if timeframe not in tf_map:
-        raise ValueError(f"Timeframe non supporté pour les actions : {timeframe}. Choisis 1m, 5m, 15m, 1h, 4h ou 1d.")
+        raise ValueError(f"Timeframe non supporté pour les actions : {timeframe}. Choisis 1m, 5m, 15m, 1h, 2h, 4h ou 1d.")
 
     start_dt = datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc)
     end_dt = datetime.fromtimestamp(until_ms / 1000, tz=timezone.utc)
@@ -570,6 +592,11 @@ def fetch_ohlcv_alpaca(symbol: str, timeframe: str,
             "Volume": "volume"
         })
         df = df[[c for c in ("open", "high", "low", "close", "volume") if c in df.columns]]
+        if timeframe == "2h":
+            print(f'      ↪️  Agrégation 1h → 2h pour {symbol}', flush=True)
+            df = _aggregate_2h(df)
+            if df.empty:
+                raise ValueError(f"Impossible d'agréger {symbol} en bougies 2h sur cette période.")
         if timeframe == "4h":
             print(f'      ↪️  Agrégation 1h → 4h séance US pour {symbol}', flush=True)
             df = _aggregate_us_4h(df)
@@ -686,8 +713,8 @@ def fetch_ohlcv_tradingview(symbol: str, timeframe: str,
 
     if payload.get("truncated"):
         print(
-            f"      ⚠️ Historique TradingView incomplet pour {resolved}. "
-            "Renseigne TV_SESSION et TV_SIGNATURE dans tv_bridge/.env pour aller plus loin.",
+            f"      ⚠️ Historique TradingView incomplet pour {resolved} : "
+            "le plafond de bougies du compte est atteint avant la date de début.",
             flush=True,
         )
 

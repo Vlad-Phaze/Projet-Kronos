@@ -8,7 +8,8 @@
 2. 1 asset / 1 slot : trades, equity, stats (drawdown, capital final, PnL) identiques au mono-asset,
    y compris avec un capital serré (entrées et SO refusés).
 3. Interactions (capital partagé + slots + assets désalignés) : comparaison à une référence Python pure,
-   écrite à part, qui réutilise les fonctions du mono-asset.
+   écrite à part, qui réutilise les fonctions du mono-asset. Un signal refusé occupe le symbole
+   jusqu'à la sortie qu'aurait eue le deal.
 4. Masque d'horaires de marché vectorisé == fonction scalaire ``barre_autorisee``.
 5. Cohérence de ``evaluate_portfolio`` et du format de sortie (compatible front / app.py).
 
@@ -191,6 +192,7 @@ def ref_portfolio(assets, p, max_active):
 
     cap = float(p.initial_capital)
     S = {}  # états des positions ouvertes, dans l'ordre d'ouverture
+    V = {}  # deals refusés : ils bloquent le symbole jusqu'à leur sortie, sans capital ni slot
     last_close_ts = {a: None for a in names}
     trades = {a: [] for a in names}
     skipped = 0
@@ -220,6 +222,25 @@ def ref_portfolio(assets, p, max_active):
         st["so_t"].append(ts)
         st["so_p"].append(price)
         cap -= so_cost
+
+    def so_check_virtual(a, i, st, price):
+        """Même Safety Order, sans mouvement de capital : le deal refusé suit le symbole seul."""
+        sig = bx.evaluer_entry_signal(ind[a], i, p)
+        if st["n"] >= p.max_safe_order:
+            return
+        trig = bx.calcular_so_trigger_price(p, st["base"], st["last_so"], st["n"],
+                                           arrs[a]["Close"][i - 1], ind[a]["atr"][i])
+        below = price <= trig
+        fire = below if p.pricedevbase == "From Base Order" else (below and sig)
+        if not fire:
+            return
+        size = bx.calcular_so_size(p, st["n"])
+        so_qty, so_cost = bx.order_fill(size, price)
+        st["inv"] += so_cost
+        st["qty"] += so_qty
+        st["avg"] = st["inv"] / st["qty"]
+        st["last_so"] = price
+        st["n"] += 1
 
     def record(a, st, exit_price, ts_exit, reason, realize):
         nonlocal cap
@@ -269,28 +290,57 @@ def ref_portfolio(assets, p, max_active):
                 if p.strategy_mode == "dca":
                     so_check(a, i, st, price, ts)
                 st["tp_live"] = True
-        slots = max_active - len(S)
-        for a in names:
-            if slots <= 0 or not ok_bar:
-                break
+        for a in list(V):
             i = idx[a].get(ts)
-            if i is None or i < 1 or a in S or last_close_ts[a] == ts:
+            if i is None:
                 continue
-            if not bx.evaluer_entry_signal(ind[a], i, p):
-                continue
+            st = V[a]
             price = arrs[a]["Close"][i]
-            order_qty, order_cost = bx.order_fill(p.base_order, price)
-            if cap < order_cost:
-                skipped += 1
+            if not ok_bar:
                 continue
-            cap -= order_cost
-            S[a] = dict(base=price, avg=price, last_so=price, n=0, inv=order_cost, qty=order_qty,
-                        tp_live=False,
-                        entry_ts=ts, entry_i=i, so_t=[], so_p=[])
-            lastpx[a] = price
-            slots -= 1
-            if p.strategy_mode == "dca":
-                so_check(a, i, S[a], price, ts)
+            tp = st["avg"] * (1 + p.take_profit / 100.0) if p.tp_type == "From Average Entry" \
+                else st["base"] * (1 + p.take_profit / 100.0)
+            touch = arrs[a]["High"][i] if st["tp_live"] else price
+            if p.price_tick > 0:
+                touch = np.floor(touch / p.price_tick + 0.5) * p.price_tick
+                tp_hit = touch + 1e-6 >= tp
+            else:
+                tp_hit = touch >= tp
+            sl_price = st["avg"] * (1 - sl_eff / 100.0)
+            sl_hit = sl_eff > 0 and arrs[a]["Low"][i] <= sl_price
+            time_hit = p.max_trade_duration_bars > 0 and (i - st["entry_i"]) >= p.max_trade_duration_bars
+            if sl_hit or tp_hit or time_hit:
+                del V[a]
+                last_close_ts[a] = ts
+            else:
+                if p.strategy_mode == "dca":
+                    so_check_virtual(a, i, st, price)
+                st["tp_live"] = True
+        if ok_bar:
+            slots = max_active - len(S)
+            for a in names:
+                i = idx[a].get(ts)
+                if i is None or i < 1 or a in S or a in V or last_close_ts[a] == ts:
+                    continue
+                if not bx.evaluer_entry_signal(ind[a], i, p):
+                    continue
+                price = arrs[a]["Close"][i]
+                order_qty, order_cost = bx.order_fill(p.base_order, price)
+                if slots > 0 and not (p.check_cash and cap < order_cost):
+                    cap -= order_cost
+                    S[a] = dict(base=price, avg=price, last_so=price, n=0, inv=order_cost, qty=order_qty,
+                                tp_live=False,
+                                entry_ts=ts, entry_i=i, so_t=[], so_p=[])
+                    lastpx[a] = price
+                    slots -= 1
+                    if p.strategy_mode == "dca":
+                        so_check(a, i, S[a], price, ts)
+                else:
+                    skipped += 1
+                    V[a] = dict(base=price, avg=price, last_so=price, n=0, inv=order_cost, qty=order_qty,
+                                tp_live=False, entry_i=i)
+                    if p.strategy_mode == "dca":
+                        so_check_virtual(a, i, V[a], price)
         tot = cap
         for a, st in S.items():
             tot += st["qty"] * lastpx[a]

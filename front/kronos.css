@@ -99,6 +99,116 @@
             box-shadow: 0 0 8px var(--up);
         }
 
+        .tv-connect-btn {
+            cursor: pointer;
+            background: transparent;
+            color: var(--ink);
+        }
+
+        .tv-connect-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+        .tv-lamp {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #3a4556;
+            box-shadow: none;
+        }
+
+        .tv-lamp.on {
+            background: var(--up);
+            box-shadow: 0 0 8px var(--up);
+        }
+
+        .tv-modal[hidden] { display: none; }
+
+        .tv-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background: rgba(7, 9, 13, 0.72);
+        }
+
+        .tv-modal-card {
+            width: min(440px, 100%);
+            background: var(--panel);
+            border: 1px solid var(--line);
+            padding: 18px;
+        }
+
+        .tv-modal-card h2 {
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--accent);
+        }
+
+        .tv-modal-card p {
+            margin: 8px 0 14px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .tv-modal-card label {
+            display: block;
+            margin-top: 12px;
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .tv-modal-card input {
+            width: 100%;
+            margin-top: 6px;
+            padding: 8px 10px;
+            border: 1px solid var(--line);
+            background: var(--bg);
+            color: var(--ink);
+            font-family: var(--mono);
+            font-size: 12px;
+        }
+
+        .tv-modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .tv-modal-actions button {
+            border: 1px solid var(--line);
+            background: transparent;
+            color: var(--ink);
+            font-family: var(--mono);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+
+        .tv-modal-actions button[type="submit"] {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .tv-modal-actions button:disabled { opacity: 0.6; cursor: wait; }
+
+        .tv-form-error {
+            min-height: 1.2em;
+            margin-top: 12px;
+            color: var(--down);
+            font-family: var(--mono);
+            font-size: 12px;
+        }
+
         .nav-links {
             display: flex;
             gap: 0;
@@ -345,6 +455,10 @@
             width: 0%;
             background: var(--accent);
             border-radius: 0;
+        }
+
+        .progress-bar:not(.indeterminate) {
+            transition: width 0.25s linear;
         }
 
         .progress-bar.indeterminate {

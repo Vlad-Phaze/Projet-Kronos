@@ -26,7 +26,7 @@ import itertools
 import threading
 from io import BytesIO
 from datetime import datetime, timedelta
-from typing import List, Dict, Tuple, Optional, Any
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -115,6 +115,24 @@ BINANCE_CACHE_TTL_SECONDS = int(os.getenv("BINANCE_CACHE_TTL_SECONDS", "600"))
 _BINANCE_FETCH_CACHE: Dict[str, Any] = {}
 _SMARTBOT_OPTIMIZER_JOBS: Dict[str, Dict[str, Any]] = {}
 _SMARTBOT_OPTIMIZER_JOBS_LOCK = threading.Lock()
+_BACKTEST_PROGRESS: Dict[str, Dict[str, Any]] = {}
+_BACKTEST_PROGRESS_LOCK = threading.Lock()
+
+
+def _set_backtest_progress(progress_id: Optional[str], label: str, percent: float) -> None:
+    """Écrit l'étape en cours. Le navigateur la lit pendant que la requête principale travaille."""
+    if not progress_id:
+        return
+    now = time.time()
+    with _BACKTEST_PROGRESS_LOCK:
+        stale = [key for key, row in _BACKTEST_PROGRESS.items() if now - row.get("updated_at", now) > 3600]
+        for key in stale:
+            _BACKTEST_PROGRESS.pop(key, None)
+        _BACKTEST_PROGRESS[progress_id] = {
+            "label": label,
+            "percent": round(max(0.0, min(99.0, float(percent))), 1),
+            "updated_at": now,
+        }
 
 try:
     import resource  # linux/unix (Render)
@@ -279,6 +297,7 @@ def _fetch_tradingview_portfolio(
     timeframe: str,
     since_ms: int,
     until_ms: int,
+    on_symbol: Optional[Callable[[int, int, str], None]] = None,
 ) -> Dict[str, Dict]:
     """TradingView d'abord. Si le pont ou un symbole échoue, le reste vient du repli."""
     fetch_data: Dict[str, Dict] = {"__FINAL__": {}, "__FINAL_META__": {}}
@@ -286,7 +305,10 @@ def _fetch_tradingview_portfolio(
     source_down = False
 
     print(f"📈 Téléchargement {len(assets)} symboles via TradingView")
-    for asset in assets:
+    total = len(assets)
+    for index, asset in enumerate(assets, 1):
+        if on_symbol:
+            on_symbol(index, total, asset)
         if source_down:
             pending.append(asset)
             continue
@@ -356,6 +378,7 @@ def _load_single_asset_df(
         '5m': '5m',
         '15m': '15m',
         '1h': '1h',
+        '2h': '2h',
         '4h': '4h',
         '1d': '1d'
     }
@@ -438,6 +461,123 @@ def _load_single_asset_df(
         raise ValueError(f"Aucune donnée dans la période demandée {start_date} -> {end_date}")
 
     return df
+
+
+def _warmup_start_date(start_date: str, timeframe: str, bars: int) -> str:
+    """Début de chargement avancé de ``bars`` bougies, pour amorcer l'ATR."""
+    minutes = backtester_exact.timeframe_minutes(timeframe) or 1440
+    start = datetime.strptime(start_date, "%Y-%m-%d") - timedelta(minutes=minutes * max(int(bars), 1), days=1)
+    return start.strftime("%Y-%m-%d")
+
+
+def _attach_timeframe_ohlcv(
+    frames: Dict[str, pd.DataFrame],
+    *,
+    exchange_name: str,
+    chart_tf: str,
+    target_tf: str,
+    start_date: str,
+    end_date: str,
+    quote: str,
+    asset_type: Optional[str],
+    warmup_bars: int,
+    enabled: bool,
+    attr: str,
+    label: str,
+    on_symbol: Optional[Callable[[int, int, str], None]] = None,
+) -> None:
+    """Charge une timeframe différente du graphique et l'attache à chaque série."""
+    chart_tf = (chart_tf or "").strip().lower()
+    target_tf = (target_tf or "").strip().lower()
+    if not enabled or not target_tf or target_tf == chart_tf:
+        return
+    if backtester_exact.timeframe_minutes(target_tf) <= 0:
+        print(f"⚠️ Timeframe {label} inconnue ({target_tf}), calcul sur {chart_tf or 'le graphique'}")
+        return
+
+    warm_start = _warmup_start_date(start_date, target_tf, max(int(warmup_bars), 1))
+    symbols = list(frames)
+    print(f"📊 {label} timeframe {target_tf} (graphique {chart_tf}) : chargement des bougies")
+    for index, symbol in enumerate(symbols, 1):
+        if on_symbol:
+            on_symbol(index, len(symbols), symbol)
+        try:
+            frames[symbol].attrs[attr] = _load_single_asset_df(
+                symbol=symbol,
+                exchange_name=exchange_name,
+                timeframe=target_tf,
+                start_date=warm_start,
+                end_date=end_date,
+                quote=quote,
+                asset_type=asset_type,
+            )
+        except Exception as exc:
+            print(f"⚠️ Bougies {label} {target_tf} indisponibles pour {symbol} ({exc})")
+
+
+def _attach_atr_ohlcv(
+    frames: Dict[str, pd.DataFrame],
+    *,
+    exchange_name: str,
+    chart_tf: str,
+    atr_tf: str,
+    start_date: str,
+    end_date: str,
+    quote: str,
+    asset_type: Optional[str],
+    atr_length: int,
+    use_atr: bool,
+    on_symbol: Optional[Callable[[int, int, str], None]] = None,
+) -> None:
+    """Charge les bougies de la timeframe ATR et les attache à chaque série du graphique."""
+    _attach_timeframe_ohlcv(
+        frames,
+        exchange_name=exchange_name,
+        chart_tf=chart_tf,
+        target_tf=atr_tf,
+        start_date=start_date,
+        end_date=end_date,
+        quote=quote,
+        asset_type=asset_type,
+        warmup_bars=max(int(atr_length), 1) * 5,
+        enabled=use_atr,
+        attr="atr_ohlcv",
+        label="ATR",
+        on_symbol=on_symbol,
+    )
+
+
+def _attach_regime_ohlcv(
+    frames: Dict[str, pd.DataFrame],
+    *,
+    exchange_name: str,
+    chart_tf: str,
+    regime_tf: str,
+    regime_filter: str,
+    regime_ema_length: int,
+    start_date: str,
+    end_date: str,
+    quote: str,
+    asset_type: Optional[str],
+    on_symbol: Optional[Callable[[int, int, str], None]] = None,
+) -> None:
+    """Charge les bougies de la timeframe du filtre de régime."""
+    mode = (regime_filter or "none").strip().lower()
+    _attach_timeframe_ohlcv(
+        frames,
+        exchange_name=exchange_name,
+        chart_tf=chart_tf,
+        target_tf=regime_tf,
+        start_date=start_date,
+        end_date=end_date,
+        quote=quote,
+        asset_type=asset_type,
+        warmup_bars=max(int(regime_ema_length), 1) * 3,
+        enabled=mode not in ("", "none", "off"),
+        attr="regime_ohlcv",
+        label="Régime",
+        on_symbol=on_symbol,
+    )
 
 
 def _request_commission(data: Dict[str, Any], exchange_name: str) -> float:
@@ -2335,6 +2475,115 @@ def health():
         "timestamp": datetime.utcnow().isoformat()
     })
 
+
+TV_BRIDGE_URL = os.environ.get("TV_BRIDGE_URL", "http://127.0.0.1:8787").rstrip("/")
+
+
+def _tv_bridge_headers() -> Dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("TV_BRIDGE_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _tv_env_path() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tv_bridge", ".env"))
+
+
+def _save_tv_credentials(session: str, signature: str) -> None:
+    path = _tv_env_path()
+    existing = ""
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            existing = handle.read()
+    rewritten = []
+    seen = set()
+    updates = {"TV_SESSION": session, "TV_SIGNATURE": signature}
+    for line in existing.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in updates:
+                rewritten.append(f"{key}={updates[key]}")
+                seen.add(key)
+                continue
+        rewritten.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            rewritten.append(f"{key}={value}")
+    temporary = path + ".tmp"
+    with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(rewritten).rstrip() + "\n")
+    os.replace(temporary, path)
+
+
+def _redact_tv_error(message: str, session: str, signature: str) -> str:
+    text = str(message or "Session TradingView refusée.")
+    if session:
+        text = text.replace(session, "")
+    if signature:
+        text = text.replace(signature, "")
+    text = " ".join(text.split()).strip()
+    return (text or "Session TradingView refusée.")[:240]
+
+
+@app.route("/tv-status", methods=["GET"])
+def tv_status():
+    """Indique si le pont a une session TradingView, sans renvoyer les cookies."""
+    import requests
+    try:
+        response = requests.get(f"{TV_BRIDGE_URL}/health", timeout=3)
+        connected = bool(response.json().get("authenticated"))
+    except Exception:
+        connected = False
+    return jsonify({"connected": connected})
+
+
+@app.route("/tv-connect", methods=["POST"])
+def tv_connect():
+    """Teste la session TradingView, puis l'enregistre seulement si le compte répond."""
+    import requests
+    body = request.get_json(silent=True) or {}
+    session = str(body.get("session") or "").strip()
+    signature = str(body.get("signature") or "").strip()
+    if not session or not signature:
+        return jsonify({"ok": False, "error": "Renseigne le session id et la signature."}), 400
+    if any(char in session or char in signature for char in "\r\n"):
+        return jsonify({"ok": False, "error": "Les cookies ne peuvent pas contenir de retour à la ligne."}), 400
+    if len(session) > 200 or len(signature) > 400:
+        return jsonify({"ok": False, "error": "Cookie trop long."}), 400
+    try:
+        response = requests.post(
+            f"{TV_BRIDGE_URL}/session",
+            json={"session": session, "signature": signature},
+            headers=_tv_bridge_headers(),
+            timeout=25,
+        )
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            "ok": False,
+            "error": "Le pont TradingView ne répond pas. Lance le serveur tv_bridge.",
+        }), 502
+    except requests.exceptions.Timeout:
+        return jsonify({"ok": False, "error": "TradingView n'a pas répondu à temps."}), 504
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
+    if response.status_code >= 400 or not payload.get("authenticated"):
+        return jsonify({
+            "ok": False,
+            "error": _redact_tv_error(payload.get("error"), session, signature),
+            "restored": bool(payload.get("restored")),
+        }), 400
+    _save_tv_credentials(session, signature)
+    return jsonify({
+        "ok": True,
+        "connected": True,
+        "username": payload.get("username") or "",
+    })
+
 @app.route("/strategies", methods=["GET"])
 def get_strategies():
     """Route nouvelle: Fournir le template pour stratégie Python personnalisée"""
@@ -3806,6 +4055,7 @@ def backtest_smartbot_v2_endpoint():
             '5m': '5m',
             '15m': '15m',
             '1h': '1h',
+            '2h': '2h',
             '4h': '4h',
             '1d': '1d'
         }
@@ -3992,6 +4242,9 @@ def backtest_smartbot_v2_endpoint():
             dsc=data.get('dsc', 'RSI + MFI'),
             dsc2_enabled=data.get('dsc2_enabled', False),
             dsc2=data.get('dsc2', 'Bollinger Band %'),
+            regime_filter=str(data.get('regime_filter') or 'none'),
+            regime_ema_length=int(data.get('regime_ema_length', 200)),
+            regime_timeframe=str(data.get('regime_timeframe') or ''),
             
             # Order Settings
             base_order=float(data.get('base_order', 1000.0)),
@@ -4008,6 +4261,7 @@ def backtest_smartbot_v2_endpoint():
             atr_length=int(data.get('atr_length', 14)),
             atr_mult=float(data.get('atr_mult', 3.0)),
             atr_mult_step_scale=float(data.get('atr_step_scale', 1.2)),
+            atr_timeframe=str(data.get('atr_timeframe') or ''),
             
             # Take Profit Settings
             strategy_mode=strategy_mode,
@@ -4038,6 +4292,31 @@ def backtest_smartbot_v2_endpoint():
             # Par défaut, on garde la position ouverte en fin de période.
             close_last_trade=bool(data.get('close_last_trade', False)),
             max_trade_duration_bars=int(data.get('max_trade_duration_bars', 0))
+        )
+
+        _attach_atr_ohlcv(
+            {symbol: df},
+            exchange_name=exchange_name,
+            chart_tf=tf,
+            atr_tf=params.atr_timeframe,
+            start_date=start_date,
+            end_date=end_date,
+            quote=str(data.get("quote") or "USDT"),
+            asset_type=data.get("asset_type"),
+            atr_length=params.atr_length,
+            use_atr=params.pricedevbase == "ATR",
+        )
+        _attach_regime_ohlcv(
+            {symbol: df},
+            exchange_name=exchange_name,
+            chart_tf=tf,
+            regime_tf=params.regime_timeframe,
+            regime_filter=params.regime_filter,
+            regime_ema_length=params.regime_ema_length,
+            start_date=start_date,
+            end_date=end_date,
+            quote=str(data.get("quote") or "USDT"),
+            asset_type=data.get("asset_type"),
         )
         
         # Exécution du backtest
@@ -4347,6 +4626,16 @@ def create_plotly_price_chart(df_price, trades_df, title: str = "Price Chart"):
     return {'data': traces, 'layout': layout}
 
 
+@app.route('/backtest-progress/<progress_id>', methods=['GET'])
+def backtest_progress(progress_id: str):
+    """Étape en cours du backtest portefeuille. Lu par le navigateur pendant le POST."""
+    with _BACKTEST_PROGRESS_LOCK:
+        row = _BACKTEST_PROGRESS.get(progress_id)
+    if not row:
+        return jsonify({"label": "Téléchargement des cours…", "percent": 0})
+    return jsonify({"label": row["label"], "percent": row["percent"]})
+
+
 @app.route('/backtest-smartbot-v2-multi', methods=['POST'])
 def backtest_smartbot_v2_multi_endpoint():
     """
@@ -4368,6 +4657,14 @@ def backtest_smartbot_v2_multi_endpoint():
         start_date = data.get('start_date', '2024-01-01')
         end_date = data.get('end_date', '2025-01-01')
         max_active_trades = int(data.get('max_active_trades', 12))
+        raw_progress = str(data.get('progress_id') or '').strip()
+        progress_id = raw_progress if 8 <= len(raw_progress) <= 80 and all(
+            character.isalnum() or character in '-_' for character in raw_progress
+        ) else ''
+
+        def note_download(index: int, total: int, symbol: str) -> None:
+            percent = 88.0 * (index - 1) / total if total else 0.0
+            _set_backtest_progress(progress_id, f"Cours : {symbol} ({index} / {total})", percent)
         
         print(f"📊 Backtest SmartBot V2 Multi-Asset: {assets} sur {exchange_name}")
         print(f"📅 Période: {start_date} → {end_date}")
@@ -4387,6 +4684,9 @@ def backtest_smartbot_v2_multi_endpoint():
             rsi_trigger_mode=data.get('rsi_trigger_mode', 'Level'),
             bb_trigger_mode=data.get('bb_trigger_mode', 'Level'),
             mfi_trigger_mode=data.get('mfi_trigger_mode', 'Level'),
+            regime_filter=str(data.get('regime_filter') or 'none'),
+            regime_ema_length=int(data.get('regime_ema_length', 200)),
+            regime_timeframe=str(data.get('regime_timeframe') or ''),
             base_order=float(data.get('base_order', 1000.0)),
             safe_order=float(data.get('safe_order', 1500.0)),
             max_safe_order=int(data.get('max_so', max_safe_order_default)),
@@ -4396,6 +4696,7 @@ def backtest_smartbot_v2_multi_endpoint():
             atr_length=int(data.get('atr_length', 14)),
             atr_mult=float(data.get('atr_mult', 3.0)),
             atr_mult_step_scale=float(data.get('atr_step_scale', 1.2)),
+            atr_timeframe=str(data.get('atr_timeframe') or ''),
             strategy_mode=strategy_mode,
             take_profit=float(data.get('take_profit', 1.5)),
             stop_loss=effective_stop_loss,
@@ -4423,7 +4724,7 @@ def backtest_smartbot_v2_multi_endpoint():
         since_ms = int(start_dt.timestamp() * 1000)
         until_ms = int(end_dt.timestamp() * 1000)
         
-        tf_map = {'1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d'}
+        tf_map = {'1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '2h': '2h', '4h': '4h', '1d': '1d'}
         tf = tf_map.get(timeframe, '1d')
         
         # ==============================================
@@ -4434,7 +4735,7 @@ def backtest_smartbot_v2_multi_endpoint():
         source, kind = _resolve_feed(exchange_name, data)
         if source == "tradingview":
             fetch_data = _fetch_tradingview_portfolio(
-                assets, kind, str(quote or "USDT"), tf, since_ms, until_ms
+                assets, kind, str(quote or "USDT"), tf, since_ms, until_ms, on_symbol=note_download
             )
             if not fetch_data["__FINAL__"]:
                 fallback = "Yahoo Finance" if kind == "stock" else "Binance"
@@ -4446,7 +4747,8 @@ def backtest_smartbot_v2_multi_endpoint():
             
             fetch_data = {"__FINAL__": {}, "__FINAL_META__": {}}
             
-            for asset in assets:
+            for index, asset in enumerate(assets, 1):
+                note_download(index, len(assets), asset)
                 try:
                     print(f"  📊 Téléchargement {asset}...")
                     df = fetch_ohlcv(
@@ -4479,6 +4781,7 @@ def backtest_smartbot_v2_multi_endpoint():
         # CRYPTO - Binance uniquement (optimisation performance)
         # ==============================================
         else:
+            _set_backtest_progress(progress_id, "Téléchargement des cours…", 0)
             print(f"🔄 Téléchargement des données pour {len(assets)} assets depuis Binance...")
             agg, detail, fetch_data = fetch_binance_only_cached(
                 bases=assets,
@@ -4488,6 +4791,7 @@ def backtest_smartbot_v2_multi_endpoint():
                 until_ms=until_ms
             )
         log_perf("fetch-data", fetch_t0)
+        _set_backtest_progress(progress_id, "Préparation des séries…", 89)
         
         if not fetch_data.get("__FINAL__"):
             return jsonify({"error": "Aucune donnée récupérée"}), 400
@@ -4500,11 +4804,16 @@ def backtest_smartbot_v2_multi_endpoint():
         print(f"🚀 PRÉPARATION MULTI-ASSET BACKTEST")
         print(f"{'='*80}\n")
         
-        for asset in assets:
-            if asset not in fetch_data["__FINAL__"]:
-                print(f"⚠️ {asset} non disponible, ignoré")
-                continue
-            
+        missing_assets = [asset for asset in assets if asset not in fetch_data["__FINAL__"]]
+        for asset in missing_assets:
+            print(f"⚠️ {asset} non disponible, ignoré")
+        prep_names = [asset for asset in assets if asset in fetch_data["__FINAL__"]]
+        for prep_index, asset in enumerate(prep_names, 1):
+            _set_backtest_progress(
+                progress_id,
+                f"Préparation des séries : {asset} ({prep_index} / {len(prep_names)})",
+                89 + 3 * prep_index / max(len(prep_names), 1),
+            )
             print(f"📈 Préparation {asset}...")
             
             df = fetch_data["__FINAL__"][asset].copy()
@@ -4548,10 +4857,56 @@ def backtest_smartbot_v2_multi_endpoint():
         if not assets_prepared:
             return jsonify({"error": "Aucun asset disponible après préparation"}), 400
         log_perf("prepare-data", prep_t0)
+
+        atr_tf_label = (params.atr_timeframe or tf).strip()
+
+        regime_tf_label = (params.regime_timeframe or tf).strip()
+
+        def note_atr(index: int, total: int, symbol: str) -> None:
+            _set_backtest_progress(
+                progress_id,
+                f"ATR {atr_tf_label} : {symbol} ({index} / {total})",
+                92,
+            )
+
+        def note_regime(index: int, total: int, symbol: str) -> None:
+            _set_backtest_progress(
+                progress_id,
+                f"Régime {regime_tf_label} : {symbol} ({index} / {total})",
+                92,
+            )
+
+        _attach_atr_ohlcv(
+            assets_prepared,
+            exchange_name=exchange_name,
+            chart_tf=tf,
+            atr_tf=params.atr_timeframe,
+            start_date=start_date,
+            end_date=end_date,
+            quote=str(quote or "USDT"),
+            asset_type=data.get("asset_type"),
+            atr_length=params.atr_length,
+            use_atr=params.pricedevbase == "ATR",
+            on_symbol=note_atr,
+        )
+        _attach_regime_ohlcv(
+            assets_prepared,
+            exchange_name=exchange_name,
+            chart_tf=tf,
+            regime_tf=params.regime_timeframe,
+            regime_filter=params.regime_filter,
+            regime_ema_length=params.regime_ema_length,
+            start_date=start_date,
+            end_date=end_date,
+            quote=str(quote or "USDT"),
+            asset_type=data.get("asset_type"),
+            on_symbol=note_regime,
+        )
         
         # Exécuter le backtest multi-portfolio avec limitation de positions
         from backtester_exact import backtest_smartbot_v2_multi_portfolio
         bt_t0 = time.perf_counter()
+        _set_backtest_progress(progress_id, "Calcul du portefeuille…", 93)
         
         per_asset_trades, per_asset_equity, per_asset_stats, combined_equity, portfolio_stats = backtest_smartbot_v2_multi_portfolio(
             assets_prepared,
@@ -4677,18 +5032,25 @@ def backtest_smartbot_v2_multi_endpoint():
         
         # Générer les graphiques pour chaque asset
         per_asset_charts = {}
-        for asset in assets_prepared.keys():
-            if asset in per_asset_trades and not per_asset_trades[asset].empty:
-                df_asset = assets_prepared[asset]
-                trades_asset = per_asset_trades[asset]
-                
-                # Générer le graphique avec les marqueurs
-                chart_data = create_plotly_price_chart(
-                    df_asset, 
-                    trades_asset, 
-                    f"{asset} - SmartBot V2"
-                )
-                per_asset_charts[asset] = chart_data
+        chart_names = [
+            asset for asset in assets_prepared
+            if asset in per_asset_trades and not per_asset_trades[asset].empty
+        ]
+        chart_total = len(chart_names)
+        for chart_index, asset in enumerate(chart_names, 1):
+            _set_backtest_progress(
+                progress_id,
+                f"Graphiques : {asset} ({chart_index} / {chart_total})",
+                94 + 5 * (chart_index - 1) / chart_total,
+            )
+            df_asset = assets_prepared[asset]
+            trades_asset = per_asset_trades[asset]
+            chart_data = create_plotly_price_chart(
+                df_asset,
+                trades_asset,
+                f"{asset} - SmartBot V2"
+            )
+            per_asset_charts[asset] = chart_data
         
         data_sources = {
             asset: fetch_data.get("__FINAL_META__", {}).get(asset, {}).get("provenance", source)
@@ -4769,6 +5131,10 @@ def _run_smartbot_optimizer(data: Dict[str, Any]) -> Dict[str, Any]:
             'atr_length': int(data.get('atr_length', 14)),
             'atr_mult': float(data.get('atr_mult', 3.0)),
             'atr_step_scale': float(data.get('atr_step_scale', 1.2)),
+            'atr_timeframe': str(data.get('atr_timeframe') or ''),
+            'regime_filter': str(data.get('regime_filter') or 'none'),
+            'regime_ema_length': int(data.get('regime_ema_length', 200)),
+            'regime_timeframe': str(data.get('regime_timeframe') or ''),
             'take_profit': float(data.get('take_profit', 1.5)),
             'stop_loss': effective_stop_loss,
             'tp_type': data.get('tp_type', 'From Average Entry'),
@@ -4817,6 +5183,32 @@ def _run_smartbot_optimizer(data: Dict[str, Any]) -> Dict[str, Any]:
             # fallback: run unique configuration as a single optimization candidate
             active_grids = {'take_profit': [base_config['take_profit']]}
 
+        atr_lengths = active_grids.get('atr_length') or [base_config['atr_length']]
+        _attach_atr_ohlcv(
+            symbol_data,
+            exchange_name=exchange_name,
+            chart_tf=str(timeframe),
+            atr_tf=str(base_config.get('atr_timeframe') or ''),
+            start_date=start_date,
+            end_date=end_date,
+            quote=str(quote or "USDT"),
+            asset_type=data.get("asset_type"),
+            atr_length=max(int(value) for value in atr_lengths),
+            use_atr=str(base_config.get('pricedevbase', 'ATR')) == 'ATR',
+        )
+        _attach_regime_ohlcv(
+            symbol_data,
+            exchange_name=exchange_name,
+            chart_tf=str(timeframe),
+            regime_tf=str(base_config.get('regime_timeframe') or ''),
+            regime_filter=str(base_config.get('regime_filter') or 'none'),
+            regime_ema_length=int(base_config.get('regime_ema_length', 200)),
+            start_date=start_date,
+            end_date=end_date,
+            quote=str(quote or "USDT"),
+            asset_type=data.get("asset_type"),
+        )
+
         grid_keys = list(active_grids.keys())
         grid_values = [active_grids[key] for key in grid_keys]
         all_combinations = list(itertools.product(*grid_values))
@@ -4852,6 +5244,10 @@ def _run_smartbot_optimizer(data: Dict[str, Any]) -> Dict[str, Any]:
                     atr_length=int(run_cfg['atr_length']),
                     atr_mult=float(run_cfg['atr_mult']),
                     atr_mult_step_scale=float(run_cfg['atr_step_scale']),
+                    atr_timeframe=str(run_cfg.get('atr_timeframe') or ''),
+                    regime_filter=str(run_cfg.get('regime_filter') or 'none'),
+                    regime_ema_length=int(run_cfg.get('regime_ema_length', 200)),
+                    regime_timeframe=str(run_cfg.get('regime_timeframe') or ''),
                     strategy_mode=strategy_mode,
                     take_profit=float(run_cfg['take_profit']),
                     stop_loss=float(run_cfg['stop_loss']),
@@ -5025,4 +5421,4 @@ if __name__ == "__main__":
     print("   POST /report")
     print("   POST /run-multi-backtest")
     print("   POST /backtest-custom-strategy")
-    app.run(debug=False, host="0.0.0.0", port=port)
+    app.run(debug=False, host="0.0.0.0", port=port, threaded=True)

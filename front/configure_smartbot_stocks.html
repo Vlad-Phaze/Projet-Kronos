@@ -62,6 +62,7 @@
                                             <option value="5m">5 minutes</option>
                                             <option value="15m">15 minutes</option>
                                             <option value="1h" selected>1 hour</option>
+                                            <option value="2h">2 hours</option>
                                             <option value="4h">4 hours</option>
                                             <option value="1d">1 day</option>
                                         </select>
@@ -124,6 +125,34 @@
                                         <label>BB% Lower Threshold</label>
                                         <input type="number" id="bb_threshold_low" value="0.0" max="1" step="0.01">
                                     </div>
+                                    <div class="form-group">
+                                        <label>Regime Filter
+                                            <span class="label-help">New deals only</span>
+                                        </label>
+                                        <select id="regime_filter">
+                                            <option value="none" selected>None</option>
+                                            <option value="above_ema">Price above EMA</option>
+                                            <option value="below_ema">Price below EMA</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>EMA Length</label>
+                                        <input type="number" id="regime_ema_length" value="200" min="1" max="500">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Regime Timeframe
+                                            <span class="label-help">Follows chart timeframe</span>
+                                        </label>
+                                        <select id="regime_timeframe">
+                                            <option value="1m">1 minute</option>
+                                            <option value="5m">5 minutes</option>
+                                            <option value="15m">15 minutes</option>
+                                            <option value="1h" selected>1 hour</option>
+                                            <option value="2h">2 hours</option>
+                                            <option value="4h">4 hours</option>
+                                            <option value="1d">1 day</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -185,6 +214,20 @@
                                             <span class="label-help">Not used if ATR</span>
                                         </label>
                                         <input type="number" id="price_deviation" value="4.0" min="0.1" step="0.1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>ATR Timeframe
+                                            <span class="label-help">Follows chart timeframe</span>
+                                        </label>
+                                        <select id="atr_timeframe">
+                                            <option value="1m">1 minute</option>
+                                            <option value="5m">5 minutes</option>
+                                            <option value="15m">15 minutes</option>
+                                            <option value="1h" selected>1 hour</option>
+                                            <option value="2h">2 hours</option>
+                                            <option value="4h">4 hours</option>
+                                            <option value="1d">1 day</option>
+                                        </select>
                                     </div>
                                     <div class="form-group">
                                         <label>ATR Length</label>
@@ -363,6 +406,31 @@
 
         applyDynamicStockDateRange();
 
+        (function bindChartTimeframeFollowers() {
+            const chartTf = document.getElementById('timeframe');
+            const form = chartTf && chartTf.closest('form');
+            if (!chartTf) return;
+            ['atr_timeframe', 'regime_timeframe'].forEach((id) => {
+                const field = document.getElementById(id);
+                if (!field) return;
+                let custom = false;
+                const follow = () => {
+                    if (!custom) field.value = chartTf.value;
+                };
+                chartTf.addEventListener('change', follow);
+                field.addEventListener('change', () => {
+                    custom = field.value !== chartTf.value;
+                });
+                if (form) {
+                    form.addEventListener('reset', () => {
+                        custom = false;
+                        setTimeout(follow, 0);
+                    });
+                }
+                follow();
+            });
+        })();
+
         document.getElementById('backtestForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -390,6 +458,9 @@
                 mfi_threshold: parseInt(document.getElementById('mfi_threshold').value),
                 bb_length: parseInt(document.getElementById('bb_length').value),
                 bb_threshold_low: parseFloat(document.getElementById('bb_threshold_low').value),
+                regime_filter: document.getElementById('regime_filter').value,
+                regime_ema_length: parseInt(document.getElementById('regime_ema_length').value),
+                regime_timeframe: document.getElementById('regime_timeframe').value,
                 
                 // Orders
                 base_order: parseFloat(document.getElementById('base_order').value),
@@ -401,6 +472,7 @@
                 pricedevbase: document.getElementById('pricedevbase').value,
                 price_deviation: parseFloat(document.getElementById('price_deviation').value),
                 atr_length: parseInt(document.getElementById('atr_length').value),
+                atr_timeframe: document.getElementById('atr_timeframe').value,
                 atr_mult: parseFloat(document.getElementById('atr_mult').value),
                 atr_step_scale: parseFloat(document.getElementById('atr_step_scale').value),
                 
@@ -1087,5 +1159,6 @@
             tableContainer.innerHTML = html;
         }
     </script>
+    <script src="tv_connect.js"></script>
 </body>
 </html>
