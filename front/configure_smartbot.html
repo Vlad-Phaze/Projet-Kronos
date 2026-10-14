@@ -273,6 +273,29 @@
                                         </select>
                                     </div>
                                     <div class="form-group">
+                                        <label>Deal Close
+                                            <span class="label-help">Signal exits even at a loss</span>
+                                        </label>
+                                        <select id="deal_close">
+                                            <option value="None" selected>None (Take Profit)</option>
+                                            <option value="RSI">RSI</option>
+                                            <option value="BB%">BB%</option>
+                                            <option value="MFI">MFI</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>RSI Close Threshold</label>
+                                        <input type="number" id="rsi_threshold_high" value="70" min="1" max="100" step="1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>BB% Close Threshold</label>
+                                        <input type="number" id="bb_threshold_high" value="0.9" min="0" max="2" step="0.01">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>MFI Close Threshold</label>
+                                        <input type="number" id="mfi_threshold_high" value="80" min="1" max="100" step="1">
+                                    </div>
+                                    <div class="form-group">
                                         <label>Commission (%)</label>
                                         <input type="number" id="commission" value="0.1" min="0" step="0.01">
                                     </div>
@@ -457,6 +480,10 @@
                 stop_loss: strategyMode === 'stop_loss' ? parseFloat(document.getElementById('stop_loss').value) : 0.0,
                 max_trade_duration_bars: parseInt(document.getElementById('max_trade_duration_bars').value),
                 tp_type: document.getElementById('tp_type').value,
+                deal_close: document.getElementById('deal_close').value,
+                rsi_threshold_high: parseInt(document.getElementById('rsi_threshold_high').value),
+                bb_threshold_high: parseFloat(document.getElementById('bb_threshold_high').value),
+                mfi_threshold_high: parseInt(document.getElementById('mfi_threshold_high').value),
                 commission: parseFloat(document.getElementById('commission').value) / 100
             };
 

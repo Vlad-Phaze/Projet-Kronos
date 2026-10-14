@@ -59,6 +59,9 @@ class ParametresDCA_SmartBotV2:
     stop_loss: float = 0.0  # Stop Loss (%) - 0 désactive le SL
     max_trade_duration_bars: int = 0  # 0 = illimité, sinon clôture forcée après N barres
     tp_type: str = "From Average Entry"  # Options: "From Average Entry", "From Base Order"
+    # None : take profit classique. RSI / BB% / MFI : le signal remplace le TP
+    # et ferme le deal au close, même si le prix est sous le prix moyen.
+    deal_close: str = "None"
     
     # ═══════════════════════════════════════════════════════════
     # INDICATOR SETTINGS: RSI
@@ -75,7 +78,7 @@ class ParametresDCA_SmartBotV2:
     bb_mult: float = 2.0
     bb_source: str = "close"
     bb_threshold_low: float = 0.0  # 0 = lower band
-    bb_threshold_high: float = 1.0  # 1 = upper band
+    bb_threshold_high: float = 0.9  # seuil de clôture BB% (Pine : dsc_bb_threshold)
     
     # ═══════════════════════════════════════════════════════════
     # INDICATOR SETTINGS: MFI
@@ -167,6 +170,48 @@ def _trigger_at(values: np.ndarray, t: int, mode: str, level: float) -> bool:
     if mode == "Crossunder":
         return bool(prev >= level and cur < level)
     return bool(cur < level)
+
+
+def normalize_deal_close(name: Optional[str]) -> str:
+    """'' si le take profit reste actif, sinon RSI, BB% ou MFI."""
+    key = (name or "").strip().lower()
+    if key == "rsi":
+        return "RSI"
+    if key in ("bb%", "bb", "bollinger band %", "bollinger"):
+        return "BB%"
+    if key == "mfi":
+        return "MFI"
+    return ""
+
+
+def close_trigger_mask(values: np.ndarray, mode: str, level: float) -> np.ndarray:
+    """Signal de clôture long : inverse de l'entrée, sur le seuil haut.
+
+    Level : valeur au-dessus du seuil. Crossover (mode croisement Pine) : crossunder du seuil.
+    Crossunder à l'entrée : crossover du seuil.
+    """
+    level = float(level)
+    prev = np.empty_like(values, dtype=float)
+    prev[0] = np.nan
+    prev[1:] = values[:-1]
+    if mode == "Crossover":
+        return (prev >= level) & (values < level)
+    if mode == "Crossunder":
+        return (prev <= level) & (values > level)
+    return values > level
+
+
+def evaluer_close_signal_vectorized(indicators: Dict[str, np.ndarray], parametres: ParametresDCA_SmartBotV2) -> np.ndarray:
+    """True sur les barres où le Deal Close Condition demande de fermer."""
+    n = len(indicators["rsi"])
+    kind = normalize_deal_close(parametres.deal_close)
+    if kind == "RSI":
+        return close_trigger_mask(indicators["rsi"], parametres.rsi_trigger_mode, parametres.dsc_rsi_threshold_high)
+    if kind == "BB%":
+        return close_trigger_mask(indicators["bb_percent"], parametres.bb_trigger_mode, parametres.bb_threshold_high)
+    if kind == "MFI":
+        return close_trigger_mask(indicators["mfi"], parametres.mfi_trigger_mode, parametres.mfi_threshold_high)
+    return np.zeros(n, dtype=bool)
 
 
 _TF_MINUTES = {
@@ -583,6 +628,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     if verbose:
         print("🎯 Pré-calcul vectorisé des signaux d'entrée...")
     entry_signals = evaluer_entry_signal_vectorized(indicators, parametres)
+    close_signals = evaluer_close_signal_vectorized(indicators, parametres)
+    close_name = normalize_deal_close(parametres.deal_close)
     regime_ohlcv = prix.attrs.get("regime_ohlcv") if getattr(prix, "attrs", None) else None
     regime_ok = regime_mask(
         prix,
@@ -644,7 +691,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
     if verbose:
         print(f"🚀 Début du backtest - {len(close)} barres")
         print(f"📋 Configuration: DSC='{parametres.dsc}', Price Deviation='{parametres.pricedevbase}'")
-        print(f"🧠 Mode stratégie: {parametres.strategy_mode} | TP={parametres.take_profit}% | SL={effective_stop_loss}%")
+        print(f"🧠 Mode stratégie: {parametres.strategy_mode} | TP={parametres.take_profit}% | SL={effective_stop_loss}% | Close={close_name or 'None'}")
         print(f"💰 Capital Initial=${parametres.initial_capital:.2f}")
         print(f"💰 Base Order=${parametres.base_order}, SO=${parametres.safe_order}, Max SO={parametres.max_safe_order}")
         print("="*80)
@@ -710,15 +757,18 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             if effective_stop_loss > 0:
                 sl_price = avg_entry_price * (1 - effective_stop_loss / 100.0)
             
-            # L'ordre limite est créé à la clôture de cette barre s'il n'était pas déjà en carnet.
-            # Tant qu'il n'est pas en carnet, seule la clôture peut le remplir. Ensuite, la mèche suffit.
-            # TradingView arrondit le prix de la bougie au mintick avant de le comparer au limite.
-            touch = high[t] if tp_order_live else price
-            if parametres.price_tick > 0:
-                touch = np.floor(touch / parametres.price_tick + 0.5) * parametres.price_tick
-                tp_hit = touch + 1e-6 >= tp_price
+            # Deal Close remplace le take profit et sort au close, même sous le prix moyen.
+            # None conserve l'ordre limite : 1re barre au close, puis la mèche. Mintick arrondi.
+            close_hit = bool(close_name) and bool(close_signals[t])
+            if close_name:
+                tp_hit = False
             else:
-                tp_hit = touch >= tp_price
+                touch = high[t] if tp_order_live else price
+                if parametres.price_tick > 0:
+                    touch = np.floor(touch / parametres.price_tick + 0.5) * parametres.price_tick
+                    tp_hit = touch + 1e-6 >= tp_price
+                else:
+                    tp_hit = touch >= tp_price
             sl_hit = sl_price is not None and low[t] <= sl_price
 
             time_exit_hit = (
@@ -726,7 +776,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 and (t - entry_bar) >= parametres.max_trade_duration_bars
             )
 
-            if tp_hit or sl_hit or time_exit_hit:
+            if tp_hit or sl_hit or time_exit_hit or close_hit:
                 # CLOSE DEAL
                 if sl_hit:
                     # Gap : l'open est déjà sous le stop, on sort au premier prix de la barre.
@@ -735,6 +785,9 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 elif tp_hit:
                     exit_price = tp_price
                     exit_reason = "TP"
+                elif close_hit:
+                    exit_price = price
+                    exit_reason = "CLOSE"
                 else:
                     exit_price = price
                     exit_reason = "TIME"
@@ -749,6 +802,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     signal_label = f"SL @ {effective_stop_loss}%"
                 elif exit_reason == "TP":
                     signal_label = f"TP @ {parametres.take_profit}%"
+                elif exit_reason == "CLOSE":
+                    signal_label = f"CLOSE {close_name}"
                 else:
                     signal_label = f"TIME @ {parametres.max_trade_duration_bars} bars"
                 
@@ -829,6 +884,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                         exit_label = "TAKE PROFIT"
                     elif exit_reason == "SL":
                         exit_label = "STOP LOSS"
+                    elif exit_reason == "CLOSE":
+                        exit_label = f"CLOSE {close_name}"
                     else:
                         exit_label = "MAX DURATION"
                     print(f"✅ [{indice[t].strftime('%Y-%m-%d')}] {exit_label} @ ${exit_price:.2f} | "

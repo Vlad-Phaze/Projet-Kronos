@@ -40,6 +40,8 @@ from backtester_exact import (
     _trigger_mask,
     atr_for_timeframe,
     bb_percent_tv,
+    close_trigger_mask,
+    normalize_deal_close,
     order_fill,
     regime_mask,
 )
@@ -111,8 +113,8 @@ _MODE_ATR, _MODE_LAST_SO, _MODE_BASE, _MODE_NONE = 0, 1, 2, 3
 _MODES = {"ATR": _MODE_ATR, "From Last Safety Order": _MODE_LAST_SO, "From Base Order": _MODE_BASE}
 
 # Codes de sortie
-_R_TP, _R_END, _R_SL, _R_TIME, _R_OPEN = 0, 1, 2, 3, 4
-_REASON_LABELS = np.array(["TP", "END", "SL", "TIME", "OPEN"], dtype=object)
+_R_TP, _R_END, _R_SL, _R_TIME, _R_OPEN, _R_CLOSE = 0, 1, 2, 3, 4, 5
+_REASON_LABELS = np.array(["TP", "END", "SL", "TIME", "OPEN", "CLOSE"], dtype=object)
 
 
 def _market_mask(timeline: pd.Index, timeframe: str) -> np.ndarray:
@@ -218,6 +220,7 @@ class PreparedPortfolio:
         """Pré-calcule les indicateurs utiles à ``p`` (à appeler avant le multi-threading)."""
         self.atr_for(p)
         self.entry_signals(p)
+        self.close_signals(p)
         self.regime_for(p)
         self.allowed(p)
 
@@ -336,6 +339,35 @@ class PreparedPortfolio:
                 sig = sig & self._part(sec, p)
         return np.ascontiguousarray(sig & self.valid)
 
+    def close_signals(self, p: ParametresDCA_SmartBotV2) -> np.ndarray:
+        """Signal de clôture [barres x assets]. Vide tant que deal_close est None."""
+        kind = normalize_deal_close(getattr(p, "deal_close", "None"))
+        if not kind:
+            return np.zeros(self.close.shape, dtype=np.bool_)
+        if kind == "RSI":
+            ind_name, ind_key = "rsi", (int(p.rsi_length),)
+            mode, level = p.rsi_trigger_mode, float(p.dsc_rsi_threshold_high)
+        elif kind == "MFI":
+            ind_name, ind_key = "mfi", (int(p.mfi_length),)
+            mode, level = p.mfi_trigger_mode, float(p.mfi_threshold_high)
+        else:
+            ind_name, ind_key = "bb", (int(p.bb_length), float(p.bb_mult))
+            mode, level = p.bb_trigger_mode, float(p.bb_threshold_high)
+        cache_key = ("close", ind_name, *ind_key, mode, level)
+        arr = self._cache.get(cache_key)
+        if arr is not None:
+            return arr
+        with self._lock:
+            arr = self._cache.get(cache_key)
+            if arr is None:
+                func, _fill = _INDICATORS[ind_name]
+                arr = np.zeros(self.close.shape, dtype=np.bool_)
+                for j, asset in enumerate(self.assets):
+                    values = func(self._dfs[asset], *ind_key)
+                    arr[self._pos[asset], j] = close_trigger_mask(values, mode, level)
+                self._cache[cache_key] = arr
+        return arr
+
 
 _EMPTY_2D = np.zeros((1, 1))
 
@@ -426,18 +458,21 @@ def _so_step(a, t, price, prev, atrv, sig, mode, max_so,
 
 @njit(cache=True, nogil=True)
 def _try_exit(price, high_px, low_px, open_px, avg, base_price, tp_live, tp_mult, tp_from_avg,
-              sl_pct, max_dur, own_now, entry_own, price_tick):
-    """Décide d'une sortie. Retourne (hit, reason, exit_price) avec reason 0 TP, 2 SL, 3 TIME."""
-    if tp_from_avg:
-        tp_price = avg * tp_mult
-    else:
-        tp_price = base_price * tp_mult
-    touch = high_px if tp_live else price
-    if price_tick > 0.0:
-        touch = np.floor(touch / price_tick + 0.5) * price_tick
-        tp_hit = touch + 1e-6 >= tp_price
-    else:
-        tp_hit = touch >= tp_price
+              sl_pct, max_dur, own_now, entry_own, price_tick, close_hit, use_close):
+    """Décide d'une sortie. Retourne (hit, reason, exit_price) : 0 TP, 2 SL, 3 TIME, 5 CLOSE."""
+    tp_price = 0.0
+    tp_hit = False
+    if not use_close:
+        if tp_from_avg:
+            tp_price = avg * tp_mult
+        else:
+            tp_price = base_price * tp_mult
+        touch = high_px if tp_live else price
+        if price_tick > 0.0:
+            touch = np.floor(touch / price_tick + 0.5) * price_tick
+            tp_hit = touch + 1e-6 >= tp_price
+        else:
+            tp_hit = touch >= tp_price
 
     sl_hit = False
     sl_price = 0.0
@@ -445,23 +480,26 @@ def _try_exit(price, high_px, low_px, open_px, avg, base_price, tp_live, tp_mult
         sl_price = avg * (1.0 - sl_pct / 100.0)
         sl_hit = low_px <= sl_price
 
+    signal_hit = use_close and close_hit
     time_hit = max_dur > 0 and (own_now - entry_own) >= max_dur
-    if not (tp_hit or sl_hit or time_hit):
+    if not (tp_hit or sl_hit or time_hit or signal_hit):
         return False, 0, 0.0
     if sl_hit:
         exit_price = open_px if open_px <= sl_price else sl_price
         return True, 2, exit_price
     if tp_hit:
         return True, 0, tp_price
+    if signal_hit:
+        return True, 5, price
     return True, 3, price
 
 
 @njit(cache=True, nogil=True)
 def _portfolio_kernel(
-    close, high, low, open_px, prev_close, present, signal, regime, atr, allowed, own_idx, last_close, last_bar, close_ok,
+    close, high, low, open_px, prev_close, present, signal, close_sig, regime, atr, allowed, own_idx, last_close, last_bar, close_ok,
     mode, tp_mult, tp_from_avg, sl_pct, max_dur, so_enabled, commission, max_so, base_order,
     initial_capital, max_active, so_size_tbl, atr_mult_tbl, dev_tbl, cum_tbl,     close_last,
-    price_tick, check_cash,
+    price_tick, check_cash, use_close,
 ):
     """Boucle portefeuille.
 
@@ -527,7 +565,8 @@ def _portfolio_kernel(
             if ok_bar:
                 hit, reason, exit_price = _try_exit(
                     price, high[t, a], low[t, a], open_px[t, a], avg[a], base_price[a], tp_live[a],
-                    tp_mult, tp_from_avg, sl_pct, max_dur, own_idx[t, a], entry_own[a], price_tick)
+                    tp_mult, tp_from_avg, sl_pct, max_dur, own_idx[t, a], entry_own[a], price_tick,
+                    close_sig[t, a], use_close)
                 if hit:
                     gross = exit_price * qty[a]
                     fees = (invested[a] + gross) * commission
@@ -567,7 +606,8 @@ def _portfolio_kernel(
                 price = close[t, a]
                 hit, _, _ = _try_exit(
                     price, high[t, a], low[t, a], open_px[t, a], avg[a], base_price[a], tp_live[a],
-                    tp_mult, tp_from_avg, sl_pct, max_dur, own_idx[t, a], entry_own[a], price_tick)
+                    tp_mult, tp_from_avg, sl_pct, max_dur, own_idx[t, a], entry_own[a], price_tick,
+                    close_sig[t, a], use_close)
                 if hit:
                     shadow[a] = False
                     in_pos[a] = False
@@ -719,8 +759,9 @@ def _run(prep: PreparedPortfolio, p: ParametresDCA_SmartBotV2, max_active_trades
         else np.zeros(len(prep.assets), dtype=np.bool_)
     effective_stop_loss = float(p.stop_loss) if p.strategy_mode == "stop_loss" else 0.0
 
+    use_close = normalize_deal_close(getattr(p, "deal_close", "None")) != ""
     return _portfolio_kernel(
-        prep.close, prep.high, prep.low, prep.open_px, prep.prev_close, prep.present, prep.entry_signals(p), prep.regime_for(p), prep.atr_for(p),
+        prep.close, prep.high, prep.low, prep.open_px, prep.prev_close, prep.present, prep.entry_signals(p), prep.close_signals(p), prep.regime_for(p), prep.atr_for(p),
         allowed, prep.own_idx, prep.last_close, prep.last_bar, close_ok,
         _MODES.get(p.pricedevbase, _MODE_NONE),
         1 + p.take_profit / 100.0,
@@ -737,6 +778,7 @@ def _run(prep: PreparedPortfolio, p: ParametresDCA_SmartBotV2, max_active_trades
         bool(p.close_last_trade),
         float(p.price_tick),
         bool(p.check_cash),
+        use_close,
     )
 
 
@@ -832,12 +874,16 @@ def backtest_portfolio_fast(
         so_prices = [tr_sp[s, :c].tolist() for s, c in zip(sel, so_counts)]
 
         positions_per_trade: List[List[Dict[str, Any]]] = []
+        close_label = f"CLOSE {normalize_deal_close(p.deal_close)}"
         for n, s in enumerate(sel):
             c = int(tr_i[s, 3])
+            reason_name = str(_REASON_LABELS[reasons[n]])
+            if reason_name == "CLOSE":
+                reason_name = close_label
             positions_per_trade.append(_individual_positions(
                 p, so_sizes, f"{asset}_{n + 1}", float(tr_f[s, 0]), float(tr_f[s, 2]),
                 str_of[int(tr_i[s, 1])], None if is_open[n] else str_of[int(tr_i[s, 2])],
-                str(_REASON_LABELS[reasons[n]]), so_prices[n],
+                reason_name, so_prices[n],
                 [str_of[int(b)] for b in tr_sb[s, :c]], bool(is_open[n])))
 
         df_trades = pd.DataFrame({
@@ -1019,6 +1065,8 @@ def backtest_mono_fast(
             label = f"TP @ {p.take_profit}%"
         elif code == _R_TIME:
             label = f"TIME @ {p.max_trade_duration_bars} bars"
+        elif code == _R_CLOSE:
+            label = f"CLOSE {normalize_deal_close(p.deal_close)}"
         else:  # END : clôture forcée, positions sans is_win/signal comme le mono-asset
             label = None
         sl_ = so_list(k)
