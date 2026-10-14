@@ -5423,11 +5423,9 @@ def optimize_smartbot_v2_status_endpoint(job_id: str):
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5002"))
-    print("🚀 Démarrage de l'API Kronos...")
-    print(f"📖 Documentation disponible sur: http://localhost:{port}")
-    print("🌐 Interface Web disponible sur:")
-    print(f"   http://localhost:{port}/upload_strategy.html")
-    print(f"   http://localhost:{port}/run_multi.html")
+    host = os.getenv("KRONOS_HOST", "127.0.0.1")
+    print("🚀 Démarrage de Kronos...")
+    print(f"🌐 Interface : http://{host}:{port}/")
     print("")
     print("🔧 Routes API disponibles:")
     print("   GET  /health")
@@ -5437,4 +5435,4 @@ if __name__ == "__main__":
     print("   POST /report")
     print("   POST /run-multi-backtest")
     print("   POST /backtest-custom-strategy")
-    app.run(debug=False, host="0.0.0.0", port=port, threaded=True)
+    app.run(debug=False, host=host, port=port, threaded=True)

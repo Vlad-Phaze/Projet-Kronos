@@ -314,12 +314,10 @@
         }
 
         function getApiBases() {
-            const localBases = ['http://127.0.0.1:5002', 'http://localhost:5002'];
-            const remoteBases = ['https://kronos-back-pdr0.onrender.com'];
-            const hostname = (window.location.hostname || '').toLowerCase();
-            const isLocalPage = window.location.protocol === 'file:' || ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
-
-            return isLocalPage ? [...localBases, ...remoteBases] : [...remoteBases, ...localBases];
+            if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+                return [window.location.origin];
+            }
+            return ['http://127.0.0.1:5002'];
         }
 
         async function postJsonWithFallback(path, payload) {
