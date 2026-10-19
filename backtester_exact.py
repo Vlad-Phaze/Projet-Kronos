@@ -101,7 +101,7 @@ class ParametresDCA_SmartBotV2:
     price_tick: float = 0.0
     # True : un BO ou un SO plus gros que le cash est ignoré.
     # False : margin_long=0, l'ordre est exécuté même si le cash ne le couvre pas.
-    check_cash: bool = True
+    check_cash: bool = False
 
 
 def est_dans_session_marche_us(timestamp: pd.Timestamp, timeframe: str) -> bool:

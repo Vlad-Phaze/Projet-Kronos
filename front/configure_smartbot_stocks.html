@@ -181,6 +181,12 @@
                                         </label>
                                         <input type="number" id="so_volume_scale" value="1.5" min="1" max="3" step="0.1">
                                     </div>
+                                    <div class="form-group dca-only">
+                                        <label>Max Safety Orders
+                                            <span class="label-help">Per deal</span>
+                                        </label>
+                                        <input type="number" id="max_so" value="20" min="0" max="50" step="1">
+                                    </div>
                                     <div class="form-group">
                                         <label>Initial Capital ($)
                                             <span class="label-help">Starting balance</span>
@@ -311,7 +317,12 @@
                     </div>
             </div>
 
+            <input type="hidden" id="rsi_trigger_mode" value="Level">
+            <input type="hidden" id="bb_trigger_mode" value="Level">
+            <input type="hidden" id="mfi_trigger_mode" value="Level">
+
             <div class="button-container">
+                <button type="button" class="btn btn-secondary param-preset" id="kronos-signal-preset">Kronos Signal v3.2</button>
                 <button type="submit" class="btn btn-primary">Run Backtest</button>
                 <button type="button" class="btn btn-secondary"onclick="resetForm()">Reset</button>
             </div>
@@ -424,10 +435,61 @@
             if (confirm('Reset all parameters?')) {
                 document.getElementById('backtestForm').reset();
                 applyDynamicStockDateRange();
+                ['rsi_trigger_mode', 'bb_trigger_mode', 'mfi_trigger_mode'].forEach((id) => {
+                    document.getElementById(id).value = 'Level';
+                });
+                document.querySelectorAll('.param-preset').forEach((item) => item.classList.remove('active'));
             }
         }
 
         applyDynamicStockDateRange();
+
+        const KRONOS_SIGNAL_V32 = {
+            dsc: 'RSI + BB',
+            rsi_length: 2,
+            rsi_threshold: 3,
+            rsi_trigger_mode: 'Crossover',
+            mfi_length: 14,
+            mfi_threshold: 20,
+            mfi_trigger_mode: 'Level',
+            bb_length: 50,
+            bb_threshold_low: 0,
+            bb_trigger_mode: 'Level',
+            base_order: 5000,
+            safe_order: 7500,
+            so_volume_scale: 1.5,
+            max_so: 5,
+            initial_capital: 250000,
+            pricedevbase: 'ATR',
+            price_deviation: 1.5,
+            atr_length: 14,
+            atr_mult: 5,
+            atr_step_scale: 1,
+            take_profit: 2,
+            tp_type: 'From Average Entry',
+            deal_close: 'None',
+            rsi_threshold_high: 70,
+            bb_threshold_high: 0.9,
+            mfi_threshold_high: 80,
+            commission: 0.1,
+            max_trade_duration_bars: 0
+        };
+
+        function applyKronosSignalPreset(button) {
+            Object.entries(KRONOS_SIGNAL_V32).forEach(([id, value]) => {
+                const field = document.getElementById(id);
+                if (field) field.value = value;
+            });
+            button.classList.add('active');
+        }
+
+        document.getElementById('kronos-signal-preset').addEventListener('click', (event) => {
+            applyKronosSignalPreset(event.currentTarget);
+        });
+        document.getElementById('backtestForm').addEventListener('input', (event) => {
+            if (event.target.id === 'symbol' || event.target.id === 'kronos-signal-preset') return;
+            document.getElementById('kronos-signal-preset').classList.remove('active');
+        });
 
         (function bindChartTimeframeFollowers() {
             const chartTf = document.getElementById('timeframe');
@@ -489,7 +551,11 @@
                 base_order: parseFloat(document.getElementById('base_order').value),
                 safe_order: parseFloat(document.getElementById('safe_order').value),
                 so_volume_scale: parseFloat(document.getElementById('so_volume_scale').value),
+                max_so: parseInt(document.getElementById('max_so').value, 10),
                 initial_capital: parseFloat(document.getElementById('initial_capital').value),
+                rsi_trigger_mode: document.getElementById('rsi_trigger_mode').value,
+                bb_trigger_mode: document.getElementById('bb_trigger_mode').value,
+                mfi_trigger_mode: document.getElementById('mfi_trigger_mode').value,
                 
                 // Price Deviation
                 pricedevbase: document.getElementById('pricedevbase').value,

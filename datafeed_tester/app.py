@@ -4242,6 +4242,9 @@ def backtest_smartbot_v2_endpoint():
             dsc=data.get('dsc', 'RSI + MFI'),
             dsc2_enabled=data.get('dsc2_enabled', False),
             dsc2=data.get('dsc2', 'Bollinger Band %'),
+            rsi_trigger_mode=data.get('rsi_trigger_mode', 'Level'),
+            bb_trigger_mode=data.get('bb_trigger_mode', 'Level'),
+            mfi_trigger_mode=data.get('mfi_trigger_mode', 'Level'),
             regime_filter=str(data.get('regime_filter') or 'none'),
             regime_ema_length=int(data.get('regime_ema_length', 200)),
             regime_timeframe=str(data.get('regime_timeframe') or ''),
@@ -4293,6 +4296,7 @@ def backtest_smartbot_v2_endpoint():
             slippage_pourcent=float(data.get('slippage', 0.0)),
             restrict_trading_to_us_market_hours=_is_us_stock(exchange_name, data),
             trading_timeframe=tf,
+            check_cash=False,
             # Par défaut, on garde la position ouverte en fin de période.
             close_last_trade=bool(data.get('close_last_trade', False)),
             max_trade_duration_bars=int(data.get('max_trade_duration_bars', 0))
@@ -4720,6 +4724,7 @@ def backtest_smartbot_v2_multi_endpoint():
             price_tick=_request_price_tick(exchange_name, data),
             restrict_trading_to_us_market_hours=_is_us_stock(exchange_name, data),
             trading_timeframe=timeframe,
+            check_cash=False,
             # Par défaut, on garde les positions ouvertes en fin de période.
             close_last_trade=bool(data.get('close_last_trade', False)),
             max_trade_duration_bars=int(data.get('max_trade_duration_bars', 0))
@@ -5282,6 +5287,7 @@ def _run_smartbot_optimizer(data: Dict[str, Any]) -> Dict[str, Any]:
                     close_last_trade=bool(run_cfg['close_last_trade']),
                     restrict_trading_to_us_market_hours=_is_us_stock(exchange_name, data),
                     trading_timeframe=timeframe,
+                    check_cash=False,
                 )
 
                 trades, equity, stats = backtest_smartbot_v2_fast(df, params)
