@@ -63,6 +63,22 @@
                                         <input type="number" id="max_active_trades" value="12" min="1" max="20">
                                     </div>
                                     <div class="form-group">
+                                        <label>Leverage
+                                            <span class="label-help">Infini prend chaque ordre. X2 autorise jusqu'à 2× le capital initial.</span>
+                                        </label>
+                                        <select id="leverage">
+                                            <option value="0" selected>Infini (TradingView)</option>
+                                            <option value="1">0 (pas de levier)</option>
+                                            <option value="1.5">X1,5</option>
+                                            <option value="2">X2</option>
+                                            <option value="2.5">X2,5</option>
+                                            <option value="3">X3</option>
+                                            <option value="4">X4</option>
+                                            <option value="5">X5</option>
+                                            <option value="10">X10</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
                                         <label>Timeframe</label>
                                         <select id="timeframe">
                                             <option value="15m">15 minutes</option>
@@ -623,6 +639,7 @@
                 progress_id: progressId,
                 quote: "USD",
                 max_active_trades: parseInt(document.getElementById('max_active_trades').value),
+                leverage: parseFloat(document.getElementById('leverage').value),
                 exchange: "tradingview",
                 asset_type: "stock",
                 timeframe: document.getElementById('timeframe').value,
@@ -928,7 +945,7 @@
             }
         }
 
-        function renderDailyPortfolioCharts(dates, equity, positions) {
+        function renderDailyPortfolioCharts(dates, equity, positions, cash) {
             const sampleIdx = [];
             for (let i = 0; i < dates.length; i++) {
                 const day = String(dates[i]).slice(0, 10);
@@ -940,6 +957,7 @@
             }
             if (!sampleIdx.length) return;
 
+            const hasCash = Array.isArray(cash) && cash.length === equity.length && cash.some((value) => value !== null && value !== undefined);
             const trades = new Map();
             (positions || []).forEach((pos) => {
                 const entryMs = Date.parse(pos.entry_time);
@@ -969,10 +987,13 @@
                 tradeList.forEach((trade) => {
                     if (trade.entryMs > at || at >= trade.exitMs) return;
                     count += 1;
-                    trade.legs.forEach((leg) => {
-                        if (leg.entryMs <= at && at < leg.exitMs) allocated += leg.size;
-                    });
+                    if (!hasCash) {
+                        trade.legs.forEach((leg) => {
+                            if (leg.entryMs <= at && at < leg.exitMs) allocated += leg.size;
+                        });
+                    }
                 });
+                if (hasCash) allocated = dayEquity - Number(cash[index]);
                 days.push(String(dates[index]).slice(0, 10));
                 allocationPct.push(dayEquity > 0 ? (allocated / dayEquity) * 100 : 0);
                 openCount.push(count);
@@ -1218,6 +1239,7 @@
                 
                 const dates = data.combined_equity.map(e => e.date);
                 const equity = data.combined_equity.map(e => e.equity);
+                const cash = data.combined_equity.map(e => e.cash);
                 
                 // Calculate open TRADES at each date for hover info  
                 // Un trade = 1 BO + tous ses SO (même trade_id)
@@ -1403,7 +1425,7 @@
                 };
                 
                 Plotly.newPlot('drawdown-chart', [drawdownTrace], drawdownLayout, {responsive: true, displaylogo: false});
-                renderDailyPortfolioCharts(dates, equity, allPositions);
+                renderDailyPortfolioCharts(dates, equity, allPositions, cash);
             }
 
             pendingAssetCharts = {};

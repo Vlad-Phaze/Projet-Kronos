@@ -212,7 +212,7 @@ def ref_portfolio(assets, p, max_active):
             return
         size = bx.calcular_so_size(p, st["n"])
         so_qty, so_cost = bx.order_fill(size, price)
-        if cap < so_cost:
+        if cap - so_cost < bx.cash_floor(p):
             return
         st["inv"] += so_cost
         st["qty"] += so_qty
@@ -266,6 +266,8 @@ def ref_portfolio(assets, p, max_active):
                 continue
             tp = st["avg"] * (1 + p.take_profit / 100.0) if p.tp_type == "From Average Entry" \
                 else st["base"] * (1 + p.take_profit / 100.0)
+            if p.price_tick > 0:
+                tp = float(np.ceil(tp / p.price_tick - 1e-6) * p.price_tick)
             touch = arrs[a]["High"][i] if st["tp_live"] else price
             if p.price_tick > 0:
                 touch = np.floor(touch / p.price_tick + 0.5) * p.price_tick
@@ -281,7 +283,14 @@ def ref_portfolio(assets, p, max_active):
                     exit_px = bar_open if bar_open <= sl_price else sl_price
                     record(a, st, exit_px, ts, "SL", True)
                 elif tp_hit:
-                    record(a, st, tp, ts, "TP", True)
+                    bar_open = arrs[a]["Open"][i]
+                    if bar_open + 1e-6 >= tp:
+                        exit_px = bar_open
+                        if p.price_tick > 0:
+                            exit_px = float(np.floor(bar_open / p.price_tick + 0.5 + 1e-8) * p.price_tick)
+                    else:
+                        exit_px = tp
+                    record(a, st, exit_px, ts, "TP", True)
                 else:
                     record(a, st, price, ts, "TIME", True)
                 del S[a]
@@ -300,6 +309,8 @@ def ref_portfolio(assets, p, max_active):
                 continue
             tp = st["avg"] * (1 + p.take_profit / 100.0) if p.tp_type == "From Average Entry" \
                 else st["base"] * (1 + p.take_profit / 100.0)
+            if p.price_tick > 0:
+                tp = float(np.ceil(tp / p.price_tick - 1e-6) * p.price_tick)
             touch = arrs[a]["High"][i] if st["tp_live"] else price
             if p.price_tick > 0:
                 touch = np.floor(touch / p.price_tick + 0.5) * p.price_tick
@@ -326,7 +337,7 @@ def ref_portfolio(assets, p, max_active):
                     continue
                 price = arrs[a]["Close"][i]
                 order_qty, order_cost = bx.order_fill(p.base_order, price)
-                if slots > 0 and not (p.check_cash and cap < order_cost):
+                if slots > 0 and cap - order_cost >= bx.cash_floor(p):
                     cap -= order_cost
                     S[a] = dict(base=price, avg=price, last_so=price, n=0, inv=order_cost, qty=order_qty,
                                 tp_live=False,

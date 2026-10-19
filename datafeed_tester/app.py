@@ -593,6 +593,20 @@ def _request_price_tick(exchange_name: str, data: Optional[Dict] = None) -> floa
     return 0.01 if _is_us_stock(exchange_name, data) else 0.0
 
 
+def _request_leverage(data: Dict[str, Any]) -> float:
+    """0 = marge infinie. 1 = cash seulement. Au-dessus, multiple du capital initial."""
+    raw = data.get("leverage", 0) if isinstance(data, dict) else 0
+    if raw is None or raw == "":
+        return 0.0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    if value <= 0:
+        return 0.0
+    return value if value >= 1 else 1.0
+
+
 def _parse_symbol_list(raw_symbols: Any) -> List[str]:
     """Normalise un champ symbole vers une liste unique de symboles."""
     if raw_symbols is None:
@@ -4725,6 +4739,7 @@ def backtest_smartbot_v2_multi_endpoint():
             restrict_trading_to_us_market_hours=_is_us_stock(exchange_name, data),
             trading_timeframe=timeframe,
             check_cash=False,
+            leverage=_request_leverage(data),
             # Par défaut, on garde les positions ouvertes en fin de période.
             close_last_trade=bool(data.get('close_last_trade', False)),
             max_trade_duration_bars=int(data.get('max_trade_duration_bars', 0))
@@ -5024,9 +5039,14 @@ def backtest_smartbot_v2_multi_endpoint():
         print(f"   Max Active Trades:          {max_active_trades}")
         
         # Formatter l'equity curve combinée
+        cash_curve = combined_equity.attrs.get("cash")
         combined_equity_list = [
-            {"date": date.strftime('%Y-%m-%d %H:%M:%S'), "equity": float(value)}
-            for date, value in combined_equity.items()
+            {
+                "date": date.strftime('%Y-%m-%d %H:%M:%S'),
+                "equity": float(value),
+                "cash": float(cash_curve[i]) if cash_curve is not None else None,
+            }
+            for i, (date, value) in enumerate(combined_equity.items())
         ]
         
         print(f"\n{'='*80}")

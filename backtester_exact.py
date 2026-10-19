@@ -101,7 +101,26 @@ class ParametresDCA_SmartBotV2:
     price_tick: float = 0.0
     # True : un BO ou un SO plus gros que le cash est ignoré.
     # False : margin_long=0, l'ordre est exécuté même si le cash ne le couvre pas.
+    # Ignoré dès que ``leverage`` est > 0.
     check_cash: bool = False
+    # 0 : marge infinie (TradingView, margin 0). 1 : pas de levier, le cash reste positif.
+    # > 1 : le cash peut descendre jusqu'à -(levier - 1) × capital initial.
+    leverage: float = 0.0
+
+
+def cash_floor(parametres: "ParametresDCA_SmartBotV2") -> float:
+    """Cash minimum autorisé juste après un achat.
+
+    Levier infini (0) et ``check_cash`` faux : aucun plancher. Levier 1, ou
+    ``check_cash`` vrai : le cash ne passe pas sous zéro. Au-dessus, l'exposition
+    peut atteindre ``levier × capital initial``.
+    """
+    leverage = float(getattr(parametres, "leverage", 0.0) or 0.0)
+    if leverage > 0.0:
+        return -(leverage - 1.0) * float(parametres.initial_capital)
+    if parametres.check_cash:
+        return 0.0
+    return -1e300
 
 
 def est_dans_session_marche_us(timestamp: pd.Timestamp, timeframe: str) -> bool:
@@ -588,13 +607,13 @@ def calcular_so_trigger_price(parametres: ParametresDCA_SmartBotV2, base_order_p
 
 
 def order_fill(notional: float, price: float):
-    """Quantité et coût. Pine : math.max(notional / price, 1). Au-dessus d'un titre, le coût reste le nominal."""
+    """Quantité entière et coût. TradingView : math.floor(notional / price), minimum 1 titre."""
     if price <= 0:
         return 0.0, 0.0
-    raw = notional / price
-    if raw < 1.0:
+    shares = float(np.floor(float(notional) / float(price)))
+    if shares < 1.0:
         return 1.0, float(price)
-    return raw, float(notional)
+    return shares, shares * float(price)
 
 
 def calcular_so_size(parametres: ParametresDCA_SmartBotV2, so_number: int) -> float:
@@ -709,7 +728,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
         if not in_trade and t != last_close_bar and entry_signal and market_bar_allowed and regime_ok[t]:
             # Vérifier capital disponible
             qty, order_cost = order_fill(parametres.base_order, price)
-            if parametres.check_cash and capital_disponible < order_cost:
+            if capital_disponible - order_cost < cash_floor(parametres):
                 skipped_trades += 1
                 if verbose:
                     print(f"⚠️ [{indice[t].strftime('%Y-%m-%d')}] TRADE SKIPPED - Capital insuffisant (${capital_disponible:.2f} < ${parametres.base_order})")
@@ -752,6 +771,8 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 tp_price = avg_entry_price * (1 + parametres.take_profit / 100.0)
             else:  # From Base Order
                 tp_price = base_order_price * (1 + parametres.take_profit / 100.0)
+            if parametres.price_tick > 0:
+                tp_price = float(np.ceil(tp_price / parametres.price_tick - 1e-6) * parametres.price_tick)
 
             sl_price = None
             if effective_stop_loss > 0:
@@ -783,7 +804,13 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                     exit_price = open_px[t] if open_px[t] <= sl_price else sl_price
                     exit_reason = "SL"
                 elif tp_hit:
-                    exit_price = tp_price
+                    # Gap : l'open est déjà au-dessus du take profit, on sort au premier prix de la barre.
+                    if open_px[t] + 1e-6 >= tp_price:
+                        exit_price = open_px[t]
+                        if parametres.price_tick > 0:
+                            exit_price = float(np.floor(open_px[t] / parametres.price_tick + 0.5 + 1e-8) * parametres.price_tick)
+                    else:
+                        exit_price = tp_price
                     exit_reason = "TP"
                 elif close_hit:
                     exit_price = price
@@ -834,7 +861,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 for so_info in current_trade_so_list:
                     so_size = so_info['size']
                     so_price = so_info['price']
-                    so_qty = so_size / so_price
+                    so_qty = so_info['qty']
                     so_proceeds = exit_price * so_qty
                     so_fees = (so_size + so_proceeds) * parametres.commission
                     so_pnl = so_proceeds - so_size - so_fees
@@ -936,7 +963,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                 
                 # Vérifier capital disponible
                 so_qty, so_cost = order_fill(so_size, price)
-                if parametres.check_cash and capital_disponible < so_cost:
+                if capital_disponible - so_cost < cash_floor(parametres):
                     if verbose:
                         print(f"⚠️ [{indice[t].strftime('%Y-%m-%d')}] SO SKIPPED - Capital insuffisant (${capital_disponible:.2f} < ${so_cost:.2f})")
                     # Continue le trade sans ajouter le SO
@@ -953,6 +980,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
                         'time': indice[t],
                         'price': price,
                         'size': so_cost,
+                        'qty': so_qty,
                         'number': current_so_count
                     })
                     
@@ -1028,7 +1056,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             for so_info in current_trade_so_list:
                 so_size = so_info['size']
                 so_price = so_info['price']
-                so_qty = so_size / so_price
+                so_qty = so_info['qty']
                 so_proceeds = prix_final * so_qty
                 so_fees = (so_size + so_proceeds) * parametres.commission
                 so_pnl = so_proceeds - so_size - so_fees
@@ -1103,7 +1131,7 @@ def backtest_smartbot_v2(prix: pd.DataFrame, parametres: ParametresDCA_SmartBotV
             for so_info in current_trade_so_list:
                 so_size = so_info['size']
                 so_price = so_info['price']
-                so_qty = so_size / so_price
+                so_qty = so_info['qty']
                 so_proceeds = prix_courant * so_qty
                 so_fees = (so_size + so_proceeds) * parametres.commission
                 so_pnl = so_proceeds - so_size - so_fees

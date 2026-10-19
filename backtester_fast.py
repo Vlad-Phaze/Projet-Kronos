@@ -3,7 +3,7 @@
 
 La logique de trading par asset est IDENTIQUE à ``backtester_exact.backtest_smartbot_v2`` (mono-asset,
 reproduction du Pine Script) : déclencheurs de Safety Order (ATR / dernier SO / Base Order,
-``deviation_scale``, signal requis hors "From Base Order"), TP sur la mèche (High) exécuté au prix du TP,
+``deviation_scale``, signal requis hors "From Base Order"), TP sur la mèche (High), exécuté à l'open si la barre ouvre déjà au-dessus du seuil, sinon au prix du TP,
 ``tp_type``, Stop Loss (``strategy_mode == "stop_loss"`` ; si l'open est déjà sous le stop,
 l'exécution se fait à l'open), sortie par durée max, horaires de marché US,
 frais prélevés à la clôture, pas de réentrée sur la barre de clôture, 1re barre ignorée.
@@ -36,6 +36,7 @@ import pandas_ta as ta
 from numba import njit
 
 from backtester_exact import (
+    cash_floor,
     ParametresDCA_SmartBotV2,
     _trigger_mask,
     atr_for_timeframe,
@@ -408,7 +409,7 @@ def _write_trade(tr_i, tr_f, tr_sb, tr_sp, k, a, entry_bar, exit_bar, reason, ex
 def _so_step(a, t, price, prev, atrv, sig, mode, max_so,
              so_size_tbl, atr_mult_tbl, dev_tbl, cum_tbl,
              qty, invested, avg, base_price, last_so, so_cnt, so_bar_buf, so_px_buf, capital,
-             check_cash):
+             min_cash):
     """Logique Safety Order du mono-asset pour l'asset ``a`` à la barre ``t``. Retourne le capital."""
     k = so_cnt[a]
     if k >= max_so:
@@ -437,13 +438,13 @@ def _so_step(a, t, price, prev, atrv, sig, mode, max_so,
         return capital
 
     so_size = so_size_tbl[k]
-    so_qty = so_size / price
+    so_qty = np.floor(so_size / price)
     if so_qty < 1.0:
         so_qty = 1.0
         so_cost = price
     else:
-        so_cost = so_size
-    if check_cash and capital < so_cost:  # SO ignoré, le trade continue
+        so_cost = so_qty * price
+    if capital - so_cost < min_cash:  # SO ignoré, le trade continue
         return capital
 
     invested[a] += so_cost
@@ -467,6 +468,10 @@ def _try_exit(price, high_px, low_px, open_px, avg, base_price, tp_live, tp_mult
             tp_price = avg * tp_mult
         else:
             tp_price = base_price * tp_mult
+        # L'ordre limite est posé sur le mintick supérieur : TradingView n'affiche et
+        # ne remplit pas un prix entre deux ticks.
+        if price_tick > 0.0:
+            tp_price = np.ceil(tp_price / price_tick - 1e-6) * price_tick
         touch = high_px if tp_live else price
         if price_tick > 0.0:
             touch = np.floor(touch / price_tick + 0.5) * price_tick
@@ -488,7 +493,14 @@ def _try_exit(price, high_px, low_px, open_px, avg, base_price, tp_live, tp_mult
         exit_price = open_px if open_px <= sl_price else sl_price
         return True, 2, exit_price
     if tp_hit:
-        return True, 0, tp_price
+        # Gap : l'open est déjà au-dessus du take profit, on sort au premier prix de la barre.
+        if open_px + 1e-6 >= tp_price:
+            exit_price = open_px
+            if price_tick > 0.0:
+                exit_price = np.floor(open_px / price_tick + 0.5 + 1e-8) * price_tick
+        else:
+            exit_price = tp_price
+        return True, 0, exit_price
     if signal_hit:
         return True, 5, price
     return True, 3, price
@@ -499,7 +511,7 @@ def _portfolio_kernel(
     close, high, low, open_px, prev_close, present, signal, close_sig, regime, atr, allowed, own_idx, last_close, last_bar, close_ok,
     mode, tp_mult, tp_from_avg, sl_pct, max_dur, so_enabled, commission, max_so, base_order,
     initial_capital, max_active, so_size_tbl, atr_mult_tbl, dev_tbl, cum_tbl,     close_last,
-    price_tick, check_cash, use_close,
+    price_tick, min_cash, use_close,
 ):
     """Boucle portefeuille.
 
@@ -537,6 +549,7 @@ def _portfolio_kernel(
     order = np.empty(n_assets, np.int64)  # ordre d'ouverture des positions
     n_open = 0
     equity = np.empty(n_bars)
+    cash_curve = np.empty(n_bars)
     open_pos_sum = 0  # somme sur les barres de (BO + SO) ouverts -> moyenne de positions ouvertes
     max_used = 0.0  # capital maximum engagé (fin de barre)
 
@@ -592,7 +605,7 @@ def _portfolio_kernel(
                         a, t, price, prev_close[t, a], atr[t, a] if mode == 0 else 0.0, signal[t, a], mode,
                         max_so, so_size_tbl, atr_mult_tbl, dev_tbl, cum_tbl,
                         qty, invested, avg, base_price, last_so, so_cnt, so_bar_buf, so_px_buf, capital,
-                        check_cash)
+                        min_cash)
                 tp_live[a] = True
             order[w] = a
             w += 1
@@ -619,7 +632,7 @@ def _portfolio_kernel(
                         a, t, price, prev_close[t, a], atr[t, a] if mode == 0 else 0.0, signal[t, a], mode,
                         max_so, so_size_tbl, atr_mult_tbl, dev_tbl, cum_tbl,
                         qty, invested, avg, base_price, last_so, so_cnt, so_bar_buf, so_px_buf, 0.0,
-                        False)
+                        -1e300)
                 tp_live[a] = True
 
         # ── Phase 2 : nouvelles entrées (Base Order) ─────────────────────────
@@ -631,13 +644,13 @@ def _portfolio_kernel(
                 if in_pos[a] or last_close_bar[a] == t or not signal[t, a] or not regime[t, a]:
                     continue
                 price = close[t, a]
-                order_qty = base_order / price
+                order_qty = np.floor(base_order / price)
                 if order_qty < 1.0:
                     order_qty = 1.0
                     order_cost = price
                 else:
-                    order_cost = base_order
-                take = slots > 0 and not (check_cash and capital < order_cost)
+                    order_cost = order_qty * price
+                take = slots > 0 and capital - order_cost >= min_cash
                 in_pos[a] = True
                 base_price[a] = price
                 avg[a] = price
@@ -654,12 +667,12 @@ def _portfolio_kernel(
                     order[n_open] = a
                     n_open += 1
                     slots -= 1
-                    so_cash = check_cash
+                    so_floor = min_cash
                     so_capital = capital
                 else:
                     skipped[a] += 1
                     shadow[a] = True
-                    so_cash = False
+                    so_floor = -1e300
                     so_capital = 0.0
                 # le mono-asset évalue aussi les SO sur la barre d'entrée
                 if so_enabled:
@@ -667,7 +680,7 @@ def _portfolio_kernel(
                         a, t, price, prev_close[t, a], atr[t, a] if mode == 0 else 0.0, True, mode, max_so,
                         so_size_tbl, atr_mult_tbl, dev_tbl, cum_tbl,
                         qty, invested, avg, base_price, last_so, so_cnt, so_bar_buf, so_px_buf, so_capital,
-                        so_cash)
+                        so_floor)
                     if take:
                         capital = so_capital
 
@@ -678,6 +691,7 @@ def _portfolio_kernel(
             tot += qty[a] * lastpx[a]
             open_pos_sum += 1 + so_cnt[a]
         equity[t] = tot
+        cash_curve[t] = capital
         used = initial_capital - capital
         if used > max_used:
             max_used = used
@@ -715,6 +729,7 @@ def _portfolio_kernel(
             a = order[r]
             tot += qty[a] * lastpx[a]
         equity[n_bars - 1] = tot
+        cash_curve[n_bars - 1] = capital
 
     # ── Positions restant ouvertes : résultat latent (pas de mouvement de capital) ──
     for r in range(n_open_end):
@@ -734,7 +749,8 @@ def _portfolio_kernel(
         n_tr += 1
 
     return (capital, n_open_end, equity, n_closed,
-            tr_i[:n_tr], tr_f[:n_tr], tr_sb[:n_tr], tr_sp[:n_tr], skipped, open_pos_sum, max_used)
+            tr_i[:n_tr], tr_f[:n_tr], tr_sb[:n_tr], tr_sp[:n_tr], skipped, open_pos_sum, max_used,
+            cash_curve)
 
 
 def _tables(p: ParametresDCA_SmartBotV2):
@@ -777,7 +793,7 @@ def _run(prep: PreparedPortfolio, p: ParametresDCA_SmartBotV2, max_active_trades
         so_size_tbl, atr_mult_tbl, dev_tbl, cum_tbl,
         bool(p.close_last_trade),
         float(p.price_tick),
-        bool(p.check_cash),
+        float(cash_floor(p)),
         use_close,
     )
 
@@ -842,7 +858,7 @@ def backtest_portfolio_fast(
     """
     prep = assets_data if isinstance(assets_data, PreparedPortfolio) else PreparedPortfolio(assets_data)
     p = parametres
-    capital, n_open_end, equity, n_closed, tr_i, tr_f, tr_sb, tr_sp, skipped, _, _ = _run(prep, p, max_active_trades)
+    capital, n_open_end, equity, n_closed, tr_i, tr_f, tr_sb, tr_sp, skipped, _, _, cash_curve = _run(prep, p, max_active_trades)
     so_sizes = _tables(p)[0]
     tl = prep.timeline
 
@@ -950,6 +966,7 @@ def backtest_portfolio_fast(
         max_drawdown, max_drawdown_pct, final_equity = 0.0, 0.0, init
 
     combined_equity = pd.Series(equity, index=tl.rename("timestamp"), name="equity")
+    combined_equity.attrs["cash"] = np.asarray(cash_curve, dtype=float)
 
     stats_values = list(per_asset_stats.values())
     total_trades_c = sum(s.get("total_trades", 0) for s in stats_values)
@@ -1016,7 +1033,7 @@ def backtest_mono_fast(
     n = len(prix)
     prep = PreparedPortfolio({"X": prix})
     (capital, n_open_end, equity, n_closed, tr_i, tr_f, tr_sb, tr_sp, _skipped,
-     open_pos_sum, max_used) = _run(prep, p, 1)
+     open_pos_sum, max_used, _cash_curve) = _run(prep, p, 1)
     class _Ts:  # accès indexé mémoïsé (l'indexation d'un DatetimeIndex pandas est lente)
         def __init__(self, index):
             self._index, self._memo = index, {}
@@ -1042,11 +1059,11 @@ def backtest_mono_fast(
         legs += [(f"SO_{num}", t_, pr, sz) for (t_, pr, sz, num) in so_list(k)]
         out = []
         for typ, e_time, e_price, size in legs:
-            q = size / e_price
+            q, cost = order_fill(size, e_price)
             proceeds = exit_price * q
-            fees = (size + proceeds) * p.commission
-            pnl = proceeds - size - fees
-            pos = {"type": typ, "entry_time": e_time, "entry_price": e_price, "size_usd": size, "qty": q,
+            fees = (cost + proceeds) * p.commission
+            pnl = proceeds - cost - fees
+            pos = {"type": typ, "entry_time": e_time, "entry_price": e_price, "size_usd": cost, "qty": q,
                    "exit_price": exit_price, "pnl": pnl, "pnl_pct": ((exit_price / e_price) - 1) * 100.0}
             if label is not None:
                 pos["is_win"] = pnl > 0
@@ -1099,11 +1116,11 @@ def backtest_mono_fast(
         legs += [(f"SO_{num}", t_, pr, sz) for (t_, pr, sz, num) in sl_]
         open_pos = []
         for typ, e_time, e_price, size in legs:
-            q = size / e_price
+            q, cost = order_fill(size, e_price)
             proceeds = cur * q
-            fees = (size + proceeds) * p.commission
-            pnl = proceeds - size - fees
-            open_pos.append({"type": typ, "entry_time": e_time, "entry_price": e_price, "size_usd": size,
+            fees = (cost + proceeds) * p.commission
+            pnl = proceeds - cost - fees
+            open_pos.append({"type": typ, "entry_time": e_time, "entry_price": e_price, "size_usd": cost,
                              "qty": q, "current_price": cur, "pnl": pnl,
                              "pnl_pct": ((cur / e_price) - 1) * 100.0, "is_open": True, "is_win": pnl > 0})
         open_trade_details = {
@@ -1241,7 +1258,7 @@ def evaluate_portfolio(
     ouvertes), mesure pertinente pour une stratégie DCA qui peut terminer avec des positions ouvertes.
     ``n_trades`` ne compte que les deals clôturés.
     """
-    capital, n_open_end, equity, n_closed, tr_i, tr_f, _, _, skipped, _, _ = _run(prep, params, max_active_trades)
+    capital, n_open_end, equity, n_closed, tr_i, tr_f, _, _, skipped, _, _, _cash_curve = _run(prep, params, max_active_trades)
     init = float(params.initial_capital)
     if len(equity):
         peak = np.maximum.accumulate(equity)
